@@ -1,0 +1,64 @@
+from typing import Optional
+
+from fastapi import APIRouter
+from pydantic import create_model, Field
+from tortoise.contrib.pydantic import pydantic_model_creator
+
+from common.result import Result, PageInfo
+from models import Goods
+
+router = APIRouter(prefix="/goods")
+
+# 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
+GoodsPydantic = pydantic_model_creator(Goods)
+# 自动生成所有字段为 Optional 的更新模型
+GoodsCreatePydantic = create_model(
+    "GoodsPydantic",
+    **{
+        # 从只读模型中读取所有字段然后给它设置成可选
+        name: (Optional[field.annotation], None)
+        for name, field in GoodsPydantic.model_fields.items()
+    },
+    category_id=(Optional[int], Field(None, alias="categoryId"))
+)
+
+
+@router.post("/add")
+async def add(goods_pydantic: GoodsCreatePydantic):
+    create_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
+    await Goods.create(**create_data)
+    return Result.success()
+
+
+@router.put("/update")
+async def update(goods_pydantic: GoodsCreatePydantic):
+    update_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
+    await Goods.filter(id=goods_pydantic.id).update(**update_data)
+    return Result.success()
+
+@router.delete("/delete/{goods_id}")
+async def delete(goods_id: int):
+    await Goods.filter(id=goods_id).delete()
+    return Result.success()
+
+@router.get("/selectPage")
+async def select(name: str = "", categoryId: int = 0, pageNum: int = 1, pageSize: int = 5):
+    # 同时获取分页数据和总数
+    query = Goods.filter(name__contains=name).prefetch_related('category') # 进行表关联
+    if categoryId > 0:
+        query = query.filter(category_id=categoryId)
+    # 获取分页数据
+    goods_list = await query.offset((pageNum - 1) * pageSize).limit(pageSize)
+    goods_list = [
+        {
+            **GoodsPydantic.model_validate(goods).model_dump(),  # id=xxx,no=xxx,name=xxx
+            "categoryName": goods.category.name if goods.category else None,
+            "categoryId": goods.category.id if goods.category else None,
+        }
+        for goods in goods_list
+    ]
+    # 计算总数
+    total = await query.count()
+    # 封装分页数据
+    pageinfo = PageInfo(total=total, list=goods_list)
+    return Result.success(pageinfo)
