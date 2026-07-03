@@ -1,0 +1,303 @@
+文档完整读完了，内容很详实。这是一套前后端分离的蛋糕商城，包含用户端前台、管理端后台、FastAPI 后端、LangChain 智能客服。下面基于其中的模块划分和 API 设计，规划出完整的项目文件夹架构。
+
+---
+
+## 项目根目录结构
+
+```
+cake-shop/
+├── backend/                 # FastAPI 后端服务
+├── frontend-user/           # 用户端前台 (Vue3)
+├── frontend-admin/          # 管理端后台 (Vue3)
+├── docs/                    # 项目文档
+├── scripts/                 # 部署/工具脚本
+├── .gitignore
+├── docker-compose.yml       # 可选：本地 Docker 编排
+└── README.md
+```
+
+---
+
+## 后端 `backend/` — FastAPI
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                     # FastAPI 应用入口，注册路由与中间件
+│   ├── config.py                   # 配置（从 .env 读取数据库 / JWT / LLM API 等）
+│   ├── database.py                 # Tortoise-ORM 初始化与 TORTOISE_ORM 配置
+│   │
+│   ├── models/                     # Tortoise-ORM 数据模型
+│   │   ├── __init__.py
+│   │   ├── admin.py                # 管理员表
+│   │   ├── user.py                 # 用户表
+│   │   ├── category.py             # 蛋糕分类表
+│   │   ├── cake.py                 # 蛋糕商品表
+│   │   ├── cake_spec.py            # 蛋糕规格表（尺寸/口味/价格）
+│   │   ├── cart.py                 # 购物车表
+│   │   ├── order.py                # 订单表
+│   │   ├── order_item.py           # 订单明细表
+│   │   ├── address.py              # 收货地址表
+│   │   ├── announcement.py         # 系统公告表
+│   │   └── order_log.py            # 订单日志表
+│   │
+│   ├── schemas/                    # Pydantic 请求/响应模型
+│   │   ├── __init__.py
+│   │   ├── auth.py                 # 登录注册请求体
+│   │   ├── user.py                 # 用户资料
+│   │   ├── category.py             # 分类
+│   │   ├── cake.py                 # 蛋糕与规格
+│   │   ├── cart.py                 # 购物车
+│   │   ├── order.py                # 订单
+│   │   ├── address.py              # 地址
+│   │   ├── announcement.py         # 公告
+│   │   └── common.py               # 统一返回格式、分页参数
+│   │
+│   ├── routers/                    # API 路由层
+│   │   ├── __init__.py
+│   │   ├── auth.py                 # /api/auth/*
+│   │   ├── users.py                # /api/users/*
+│   │   ├── categories.py           # /api/categories/*
+│   │   ├── cakes.py                # /api/cakes/*
+│   │   ├── cart.py                 # /api/cart/*
+│   │   ├── orders.py               # /api/orders/*
+│   │   ├── addresses.py            # /api/addresses/*
+│   │   ├── announcements.py        # /api/announcements/*
+│   │   ├── dashboard.py            # /api/dashboard/*
+│   │   └── agent.py                # /api/agent/*
+│   │
+│   ├── services/                   # 业务逻辑层
+│   │   ├── __init__.py
+│   │   ├── auth_service.py         # 注册、登录、JWT 签发
+│   │   ├── user_service.py         # 用户 CRUD、状态管理
+│   │   ├── category_service.py     # 分类 CRUD
+│   │   ├── cake_service.py         # 蛋糕 CRUD、规格管理
+│   │   ├── cart_service.py         # 购物车增删改查
+│   │   ├── order_service.py        # 下单（事务）、支付、状态流转
+│   │   ├── address_service.py      # 地址 CRUD
+│   │   ├── announcement_service.py # 公告 CRUD
+│   │   └── dashboard_service.py    # 统计查询
+│   │
+│   ├── middleware/                 # 中间件
+│   │   ├── __init__.py
+│   │   └── auth_middleware.py      # JWT 鉴权依赖（Depends）
+│   │
+│   ├── utils/                      # 工具函数
+│   │   ├── __init__.py
+│   │   ├── response.py             # 统一 JSON 响应 helper
+│   │   ├── file_upload.py          # 图片上传与存储
+│   │   └── password.py             # bcrypt 哈希工具
+│   │
+│   └── agent/                      # 智能客服模块
+│       ├── __init__.py
+│       ├── agent.py                # LangChain ReAct Agent 初始化
+│       ├── tools.py                # @tool 工具定义（search_cakes, get_cake_detail 等）
+│       ├── prompt.py               # System Prompt 配置
+│       └── chat_history.py         # 对话历史管理
+│
+├── migrations/                     # Aerich 数据库迁移文件
+├── static/
+│   └── uploads/                    # 商品图片上传目录（开发阶段）
+│
+├── .env.example                    # 环境变量模板
+├── .env                            # 本地环境变量（不入库）
+├── requirements.txt                # 依赖清单
+└── pyproject.toml                  # 项目元数据与工具配置
+```
+
+---
+
+## 前端用户端 `frontend-user/` — Vue3 + Vite + Element Plus
+
+```
+frontend-user/
+├── public/
+│   └── favicon.ico
+│
+├── src/
+│   ├── api/                        # API 接口封装（Axios）
+│   │   ├── request.js              # Axios 实例、拦截器、统一错误处理
+│   │   ├── auth.js                 # 登录/注册
+│   │   ├── user.js                 # 个人信息 / 地址
+│   │   ├── category.js             # 分类
+│   │   ├── cake.js                 # 蛋糕浏览/搜索
+│   │   ├── cart.js                 # 购物车
+│   │   ├── order.js                # 订单
+│   │   ├── announcement.js         # 公告
+│   │   └── agent.js                # 智能客服
+│   │
+│   ├── assets/                     # 静态资源
+│   │   ├── images/
+│   │   └── styles/
+│   │       └── global.css          # 全局样式/主题变量
+│   │
+│   ├── components/                 # 通用组件
+│   │   ├── Navbar.vue              # 顶部导航栏
+│   │   ├── FooterBar.vue           # 页脚
+│   │   ├── CakeCard.vue            # 蛋糕商品卡片
+│   │   ├── CartBadge.vue           # 购物车角标
+│   │   └── AgentChat.vue           # 智能客服对话气泡窗口
+│   │
+│   ├── layouts/
+│   │   ├── DefaultLayout.vue       # 前台整体布局（导航栏 + 内容区 + 页脚）
+│   │   └── BlankLayout.vue         # 空白布局（登录/注册页使用）
+│   │
+│   ├── router/
+│   │   └── index.js                # Vue Router 路由配置
+│   │
+│   ├── stores/                     # Pinia 状态管理
+│   │   ├── userStore.js            # 用户登录态与个人信息
+│   │   └── cartStore.js            # 购物车状态
+│   │
+│   ├── utils/
+│   │   ├── token.js                # Token 读写/过期判断
+│   │   └── format.js               # 金额/日期格式化
+│   │
+│   ├── views/                      # 页面组件
+│   │   ├── home/                   # 首页
+│   │   │   ├── HomeView.vue        # 轮播 + 热门推荐 + 分类入口
+│   │   │   └── components/
+│   │   │       ├── BannerCarousel.vue
+│   │   │       └── HotCakes.vue
+│   │   │
+│   │   ├── goods/                  # 商品相关
+│   │   │   ├── GoodsList.vue       # 商品列表（分类筛选 + 搜索）
+│   │   │   └── GoodsDetail.vue     # 商品详情（规格选择 + 加购）
+│   │   │
+│   │   ├── cart/
+│   │   │   └── CartView.vue        # 购物车页面
+│   │   │
+│   │   ├── order/                  # 订单相关
+│   │   │   ├── OrderCheckout.vue   # 结算页（确认商品 + 选择地址 + 提交）
+│   │   │   ├── OrderPay.vue        # 模拟支付页
+│   │   │   ├── OrderList.vue       # 订单列表（按状态切换）
+│   │   │   └── OrderDetail.vue     # 订单详情
+│   │   │
+│   │   ├── user/                   # 个人中心
+│   │   │   ├── ProfileView.vue     # 个人信息编辑
+│   │   │   ├── AddressList.vue     # 地址管理
+│   │   │   ├── AddressForm.vue     # 地址新增/编辑
+│   │   │   └── ChangePassword.vue  # 修改密码
+│   │   │
+│   │   ├── auth/
+│   │   │   ├── LoginView.vue       # 登录页
+│   │   │   └── RegisterView.vue    # 注册页
+│   │   │
+│   │   └── error/
+│   │       └── NotFound.vue        # 404
+│   │
+│   ├── App.vue                     # 根组件
+│   └── main.js                     # 入口（挂载 app、router、pinia、element-plus）
+│
+├── index.html
+├── package.json
+└── vite.config.js
+```
+
+---
+
+## 前端管理端 `frontend-admin/` — Vue3 + Vite + Element Plus
+
+```
+frontend-admin/
+├── public/
+│   └── favicon.ico
+│
+├── src/
+│   ├── api/                        # API 接口封装
+│   │   ├── request.js              # Axios 实例（含 admin token 拦截器）
+│   │   ├── auth.js                 # 管理员登录
+│   │   ├── users.js                # 用户管理
+│   │   ├── categories.js           # 分类管理
+│   │   ├── cakes.js                # 蛋糕管理（含图片上传）
+│   │   ├── orders.js               # 订单管理
+│   │   ├── announcements.js        # 公告管理
+│   │   └── dashboard.js            # 数据统计
+│   │
+│   ├── assets/
+│   │   ├── images/
+│   │   └── styles/
+│   │       └── admin.css           # 后台全局样式
+│   │
+│   ├── components/                 # 通用组件
+│   │   ├── AdminSidebar.vue        # 侧边栏导航
+│   │   ├── AdminHeader.vue         # 顶部栏（头像、退出）
+│   │   └── UploadImage.vue         # 图片上传组件
+│   │
+│   ├── layouts/
+│   │   ├── AdminLayout.vue         # 后台整体布局（侧边栏 + 顶栏 + 内容区）
+│   │   └── BlankLayout.vue         # 空白布局（登录页使用）
+│   │
+│   ├── router/
+│   │   └── index.js                # Vue Router（含路由守卫判断登录态）
+│   │
+│   ├── stores/
+│   │   └── adminStore.js           # 管理员登录态
+│   │
+│   ├── utils/
+│   │   ├── token.js
+│   │   └── format.js
+│   │
+│   ├── views/                      # 页面
+│   │   ├── login/
+│   │   │   └── AdminLogin.vue      # 管理员登录
+│   │   │
+│   │   ├── dashboard/
+│   │   │   └── DashboardView.vue   # 数据看板（卡片 + ECharts 图表）
+│   │   │
+│   │   ├── user/
+│   │   │   └── UserList.vue        # 用户列表（搜索、禁用/启用）
+│   │   │
+│   │   ├── goods/                  # 商品管理
+│   │   │   ├── CategoryList.vue    # 分类管理
+│   │   │   ├── CakeList.vue        # 蛋糕列表
+│   │   │   └── CakeForm.vue        # 新增/编辑蛋糕（含规格表单）
+│   │   │
+│   │   ├── order/
+│   │   │   ├── OrderList.vue       # 订单列表（状态筛选、搜索）
+│   │   │   └── OrderDetail.vue     # 订单详情（含状态变更操作）
+│   │   │
+│   │   ├── announcement/
+│   │   │   └── AnnouncementList.vue # 公告管理（含新增/编辑弹窗）
+│   │   │
+│   │   ├── settings/
+│   │   │   ├── AdminProfile.vue    # 管理员资料编辑
+│   │   │   └── ChangePassword.vue  # 修改密码
+│   │   │
+│   │   └── error/
+│   │       └── NotFound.vue
+│   │
+│   ├── App.vue
+│   └── main.js
+│
+├── index.html
+├── package.json
+└── vite.config.js
+```
+
+---
+
+## 文档与脚本
+
+```
+docs/
+├── api.md              # API 接口文档（可自动生成）
+├── deploy.md           # 部署手册
+└── dev-guide.md        # 开发指南
+
+scripts/
+├── init_db.sql         # 数据库初始化脚本
+├── seed_data.py        # 开发环境初始数据填充
+└── start.sh            # 一键启动（后端 + 两个前端）
+```
+
+---
+
+这个结构有几点考虑：
+
+1. **后端严格分层** — `models`（ORM）→ `services`（业务）→ `routers`（路由），每层只依赖下一层，方便测试和替换。智能客服独立为 `agent/` 包，与业务代码解耦。
+2. **两个前端各自独立** — 用户端和管理端的组件、路由、API 封装完全隔离，避免因权限和 UI 差异互相耦合。公共代码（如请求工具函数）通过内部 copy 而非共享包，对新手更简单。
+3. **增量友好** — 与文档中 30 天开发计划对应：第一阶段先把 `backend/app/main.py`、路由入口、数据库模型搭好；第二阶段开始往 `routers/` 和 `services/` 里填充具体模块即可，不需要重构目录。
+
+要不要我直接从这份规划开始，帮你把项目脚手架文件（目录结构、配置文件、依赖清单）生成出来？
