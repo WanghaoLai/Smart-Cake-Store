@@ -1,0 +1,12 @@
+fastapi~=0.124.2
+uvicorn~=0.38.0
+tortoise~=0.0.3
+tortoise-orm~=0.25.1
+python-multipart~=0.0.20
+starlette~=0.50.0
+aiomysql~=0.3.2
+pydantic~=2.12.5
+cryptography
+dashscope>=1.10.0
+faiss-cpu>=1.7.4
+numpy>=1.24.0

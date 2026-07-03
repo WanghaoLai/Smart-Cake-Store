@@ -1,0 +1,106 @@
+from tortoise.models import Model
+from tortoise import fields
+
+# 创建Admin的Model
+class Admin(Model):
+    id = fields.IntField(pk=True, null=False)
+    username = fields.CharField(max_length=255, null=True)
+    password = fields.CharField(max_length=255, null=True)
+    name = fields.CharField(max_length=255, null=True)
+    avatar = fields.CharField(max_length=255, null=True)
+    role = fields.CharField(max_length=255, null=True)
+
+    class Meta:
+        table = 'admin'
+
+
+# 创建User的Model
+class User(Model):
+    id = fields.IntField(pk=True, null=False)
+    username = fields.CharField(max_length=255, null=True)
+    password = fields.CharField(max_length=255, null=True)
+    name = fields.CharField(max_length=255, null=True)
+    avatar = fields.CharField(max_length=255, null=True)
+    role = fields.CharField(max_length=255, null=True)
+
+    class Meta:
+        table = 'user'
+
+
+# 创建Category的Model
+class Category(Model):
+    id = fields.IntField(pk=True, null=False)
+    name = fields.CharField(max_length=255, null=True)
+
+    class Meta:
+        table = 'category'
+
+
+# 创建Goods的Model
+class Goods(Model):
+    id = fields.IntField(pk=True, null=False)
+    name = fields.CharField(max_length=255, null=True)
+    price = fields.FloatField(null=True)
+    description = fields.CharField(max_length=255, null=True)
+    img = fields.CharField(max_length=255, null=True)
+    num = fields.IntField(null=True)
+    unit = fields.CharField(max_length=255, null=True)
+    category = fields.ForeignKeyField('models.Category', null=True)
+
+    class Meta:
+        table = 'goods'
+
+class Address(Model):
+    id = fields.IntField(pk=True, null=False)
+    user = fields.ForeignKeyField('models.User', null=True)
+    name = fields.CharField(max_length=255, null=True)
+    address = fields.CharField(max_length=255, null=True)
+    phone = fields.CharField(max_length=255, null=True)
+
+    class Meta:
+        table = 'address'
+
+class Orders(Model):
+    id = fields.IntField(pk=True, null=False)
+    num = fields.IntField(null=True)
+    user = fields.ForeignKeyField('models.User', null=True)
+    goods = fields.ForeignKeyField('models.Goods', null=True)
+    address = fields.ForeignKeyField('models.Address', null=True)
+    time = fields.CharField(max_length=255, null=True)
+
+    class Meta:
+        table = 'orders'
+
+class Notice(Model):
+    id = fields.IntField(pk=True, null=False)
+    name = fields.CharField(max_length=255, null=True)
+    content = fields.CharField(max_length=255, null=True)
+    time = fields.CharField(max_length=255, null=True)
+
+    class Meta:
+        table = 'notice'
+
+
+class Conversation(Model):
+    id = fields.IntField(pk=True, null=False)
+    user = fields.ForeignKeyField('models.User', related_name='conversations')
+    title = fields.CharField(max_length=255, default='新对话')
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = 'conversation'
+
+
+class Message(Model):
+    id = fields.IntField(pk=True, null=False)
+    conversation = fields.ForeignKeyField('models.Conversation', related_name='messages')
+    role = fields.CharField(max_length=20)  # 'user' 或 'assistant'
+    content = fields.TextField()
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'message'
+
+
+
