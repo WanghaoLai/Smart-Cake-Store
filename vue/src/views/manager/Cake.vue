@@ -102,6 +102,7 @@ const loadCategory = () => {
         const matched = res.data.find(c => c.name === categoryName)
         data.categoryId = matched ? matched.id : 0
       }
+      load()
     } else {
       ElMessage.error(res.msg)
     }
@@ -146,7 +147,6 @@ const load = () => {
     }
   })
 }
-load()
 
 const save = () => {
   request.post('/orders/add', data.form).then(res => {
