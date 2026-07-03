@@ -28,16 +28,16 @@ api_router = APIRouter()
 @api_router.post("/login")
 async def login(account: Account):
     if account.role == '管理员':
-        admin = await Admin.get(username=account.username)
+        admin = await Admin.get_or_none(username=account.username)
         if admin is None:
-            raise CustomException("账号或密码错误")
+            raise CustomException("账号不存在，请注册账号")
         if admin.password != account.password:
             raise CustomException("账号或密码错误")
         account = Account.model_validate(admin)
     if account.role == '用户':
-        user = await User.get(username=account.username)
+        user = await User.get_or_none(username=account.username)
         if user is None:
-            raise CustomException("账号或密码错误")
+            raise CustomException("账号不存在，请注册账号")
         if user.password != account.password:
             raise CustomException("账号或密码错误")
         account = user
