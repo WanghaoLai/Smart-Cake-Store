@@ -34,3 +34,8 @@ AI_CONFIG = {
     "top_k": 3,  # RAG 检索数量
 }
 
+# JWT 配置
+JWT_SECRET_KEY = "cake-store-jwt-secret-key-2026"
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 24
+

@@ -112,9 +112,7 @@ const scrollToBottom = () => {
 
 const loadConversations = async () => {
   try {
-    const res = await request.get('/chat/conversations', {
-      params: { userId: data.user.id }
-    })
+    const res = await request.get('/chat/conversations')
     if (res.code === '200') {
       data.conversations = res.data || []
     }
@@ -127,8 +125,6 @@ const createConversation = async () => {
   try {
     const res = await request.post('/chat/conversation', {
       title: '新对话'
-    }, {
-      params: { userId: data.user.id }
     })
     if (res.code === '200') {
       await loadConversations()
@@ -195,10 +191,11 @@ const sendMessage = async () => {
   })
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_BASE_URL}/chat/send?userId=${data.user.id}`, {
+    const response = await fetch(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
       },
       body: JSON.stringify({
         conversation_id: data.currentConversation,

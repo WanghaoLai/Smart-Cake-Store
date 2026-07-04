@@ -1,18 +1,18 @@
 import json
 from typing import Optional
-from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from common.auth import get_current_user
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Conversation, Message, User, Goods
 from services import LLMService, RAGService, ChatService
 from settings import AI_CONFIG
 
-router = APIRouter(prefix="/chat")
+router = APIRouter(prefix="/chat", dependencies=[Depends(get_current_user)])
 
 llm_service = LLMService(
     api_key=AI_CONFIG["dashscope_api_key"],
@@ -32,17 +32,17 @@ class MessageRequest(BaseModel):
 
 
 @router.post("/conversation")
-async def create_conversation(data: ConversationCreate, userId: int):
+async def create_conversation(data: ConversationCreate, current_user: dict = Depends(get_current_user)):
     conversation = await Conversation.create(
-        user_id=userId,
+        user_id=current_user["user_id"],
         title=data.title
     )
     return Result.success({"id": conversation.id, "title": conversation.title})
 
 
 @router.get("/conversations")
-async def get_conversations(userId: int):
-    conversations = await Conversation.filter(user_id=userId).order_by("-updated_at")
+async def get_conversations(current_user: dict = Depends(get_current_user)):
+    conversations = await Conversation.filter(user_id=current_user["user_id"]).order_by("-updated_at")
     result = []
     for conv in conversations:
         result.append({
@@ -69,7 +69,7 @@ async def get_messages(conversation_id: int):
 
 
 @router.post("/send")
-async def send_message(data: MessageRequest, userId: int):
+async def send_message(data: MessageRequest, current_user: dict = Depends(get_current_user)):
     conversation = await Conversation.get_or_none(id=data.conversation_id)
     if not conversation:
         raise CustomException("会话不存在")
@@ -85,7 +85,7 @@ async def send_message(data: MessageRequest, userId: int):
 
     async def generate():
         full_response = ""
-        async for chunk in chat_service.process_message_stream(data.message, history_list[:-1]):
+        async for chunk in chat_service.process_message_stream(data.message, history_list[:-1], current_user["user_id"]):
             full_response += chunk
             yield f"data: {json.dumps({'content': chunk})}\n\n"
 
@@ -105,9 +105,9 @@ async def send_message(data: MessageRequest, userId: int):
         generate(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache", # 禁用缓存
-            "Connection": "keep-alive", # 保持连接
-            "X-Accel-Buffering": "no" # 禁用 Nginx 代理缓冲
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
         }
     )
 
