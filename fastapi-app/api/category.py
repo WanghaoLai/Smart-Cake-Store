@@ -1,13 +1,14 @@
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import create_model
 from tortoise.contrib.pydantic import pydantic_model_creator
 
+from common.auth import get_current_user
 from common.result import Result, PageInfo
 from models import Category
 
-router = APIRouter(prefix="/category")
+router = APIRouter(prefix="/category", dependencies=[Depends(get_current_user)])
 
 # 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
 CategoryPydantic = pydantic_model_creator(Category)

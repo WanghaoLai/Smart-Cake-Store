@@ -56,8 +56,9 @@
         request.post('/login', data.form).then(res => {
           if (res.code === '200') {
             ElMessage.success("登录成功")
+            localStorage.setItem('token', res.data.token)
+            localStorage.setItem('system-user', JSON.stringify(res.data.user))
             router.push('/manager/home')
-            localStorage.setItem('system-user', JSON.stringify(res.data))
           } else {
             ElMessage.error(res.msg)
           }

@@ -11,6 +11,10 @@ const request = axios.create({
 // 可以自请求发送前对请求做一些处理
 request.interceptors.request.use(config => {
     config.headers['Content-Type'] = 'application/json;charset=utf-8';
+    const token = localStorage.getItem('token');
+    if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`;
+    }
     return config
 }, error => {
     return Promise.reject(error)
@@ -37,9 +41,15 @@ request.interceptors.response.use(
         return res;
     },
         error => {
-        console.log('err' + error)
-        return Promise.reject(error)
-    }
+            if (error.response && error.response.status === 401) {
+                ElMessage.error('登录已过期，请重新登录');
+                localStorage.removeItem('token');
+                localStorage.removeItem('system-user');
+                router.push('/login');
+            }
+            console.log('err' + error)
+            return Promise.reject(error)
+        }
 )
 
 

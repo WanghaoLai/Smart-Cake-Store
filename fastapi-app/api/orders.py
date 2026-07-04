@@ -1,14 +1,16 @@
 from datetime import datetime
+import random
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 
+from common.auth import get_current_user
 from common.result import Result, PageInfo
 from models import Orders, Goods
 
-router = APIRouter(prefix="/orders")
+router = APIRouter(prefix="/orders", dependencies=[Depends(get_current_user)])
 
 # 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
 OrdersPydantic = pydantic_model_creator(Orders)
@@ -29,12 +31,24 @@ OrdersCreatePydantic = create_model(
 @router.post("/add")
 async def add(orders_pydantic: OrdersCreatePydantic):
     create_data = orders_pydantic.model_dump(exclude_unset=True, exclude={'id'})
-    create_data['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now()
+    create_data['time'] = now.strftime('%Y-%m-%d %H:%M:%S')
+    create_data['order_no'] = now.strftime('%Y%m%d%H%M%S') + str(random.randint(1000, 9999))
     await Orders.create(**create_data)
     # 更新一下商品表的库存
     goods = await Goods.filter(id=orders_pydantic.goods_id).first()
     goods.num = goods.num - orders_pydantic.num
     await goods.save()
+    return Result.success()
+
+
+@router.delete("/delete/{id}")
+async def delete(id: int):
+    order = await Orders.filter(id=id).prefetch_related("goods").first()
+    if order and order.goods:
+        order.goods.num += order.num
+        await order.goods.save()
+    await Orders.filter(id=id).delete()
     return Result.success()
 
 
