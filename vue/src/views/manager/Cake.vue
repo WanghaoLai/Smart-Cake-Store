@@ -12,12 +12,17 @@
             <img :src="item.img" alt="" style="width: 100%; height: 300px; border-radius: 5px">
             <div>
               <div style="font-weight: bold; font-size: 16px">{{ item.name }}</div>
-              <div style="margin-top: 5px" class="line1">简介：{{ item.description }}</div>
+              <el-tooltip :content="item.description" placement="top" effect="light">
+                <div style="margin-top: 5px" class="line1">简介：{{ item.description }}</div>
+              </el-tooltip>
               <div style="margin-top: 10px; display: flex">
                 <div style="color: red; font-weight: bold; flex: 1">价格：￥{{ item.price }}</div>
                 <div style="flex: 1; text-align: right">剩余{{ item.num }}{{ item.unit }}</div>
               </div>
-              <div style="margin-top: 10px; text-align: right">
+              <div style="margin-top: 10px; display: flex; justify-content: space-between">
+                <el-button :type="data.favoritedIds[item.id] ? 'warning' : 'default'" size="big" @click="toggleFav(item.id)">
+                  {{ data.favoritedIds[item.id] ? '已收藏' : '收藏' }}
+                </el-button>
                 <el-button type="success" :disabled="item.num === 0" @click="reserveInit(item.id)">预订</el-button>
               </div>
             </div>
@@ -77,7 +82,41 @@ const data = reactive({
   total: 0,
   tableData: [],
   addressList: [],
+  favoritedIds: {},
 })
+
+
+const loadFavorites = () => {
+  request.get('/favorite/list').then(res => {
+    if (res.code === '200') {
+      const map = {}
+      ;(res.data || []).forEach(g => { map[g.id] = true })
+      data.favoritedIds = map
+    }
+  })
+}
+
+const toggleFav = (goodsId) => {
+  if (data.favoritedIds[goodsId]) {
+    request.delete('/favorite/remove/' + goodsId).then(res => {
+      if (res.code === '200') {
+        data.favoritedIds[goodsId] = false
+        ElMessage.success('已取消收藏')
+      } else {
+        ElMessage.error(res.msg)
+      }
+    })
+  } else {
+    request.post('/favorite/add', { goods_id: goodsId }).then(res => {
+      if (res.code === '200') {
+        data.favoritedIds[goodsId] = true
+        ElMessage.success('收藏成功')
+      } else {
+        ElMessage.error(res.msg)
+      }
+    })
+  }
+}
 
 
 const loadAddress = () => {
@@ -110,6 +149,7 @@ const loadCategory = () => {
 }
 loadAddress()
 loadCategory()
+loadFavorites()
 
 watch(() => route.query.categoryName, (newName) => {
   if (newName) {

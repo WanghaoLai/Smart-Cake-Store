@@ -107,6 +107,10 @@
             <el-icon><ChatDotRound /></el-icon>
             <span>智能客服</span>
           </el-menu-item>
+          <el-menu-item index="/manager/favorite" v-if="data.user.role === '用户'">
+            <el-icon><Star /></el-icon>
+            <span>我的收藏</span>
+          </el-menu-item>
           <el-menu-item index="/manager/person">
             <el-icon><User /></el-icon>
             <span>个人资料</span>

@@ -104,4 +104,14 @@ class Message(Model):
         table = 'message'
 
 
+class Favorite(Model):
+    id = fields.IntField(pk=True, null=False)
+    user = fields.ForeignKeyField('models.User', null=True)
+    goods = fields.ForeignKeyField('models.Goods', null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'favorite'
+
+
 
