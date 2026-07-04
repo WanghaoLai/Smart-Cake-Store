@@ -23,6 +23,7 @@ const router = createRouter({
         { path: 'orders', component: () => import('@/views/manager/Orders.vue')},
         { path: 'notice', component: () => import('@/views/manager/Notice.vue')},
         { path: 'chat', component: () => import('@/views/manager/Chat.vue')},
+        { path: 'favorite', component: () => import('@/views/manager/Favorite.vue')},
       ]
     },
     { path: '/login', component: () => import('@/views/Login.vue')},
