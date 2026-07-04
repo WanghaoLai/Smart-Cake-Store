@@ -7,6 +7,7 @@
     </div>
     <div class="card" style="margin-bottom: 5px">
       <el-table :data="data.tableData" stripe>
+        <el-table-column label="订单号" prop="order_no" width="180"></el-table-column>
         <el-table-column label="下单用户" prop="userName"></el-table-column>
         <el-table-column label="商品图片" prop="goodsImg">
           <template #default="scope">

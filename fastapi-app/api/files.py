@@ -2,9 +2,10 @@
 import os
 import shutil
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Depends
 from starlette.responses import FileResponse
 
+from common.auth import get_current_user
 from common.exception_handler import CustomException
 from common.result import Result
 
@@ -12,7 +13,7 @@ UPLOAD_DIR = "files"
 router = APIRouter(prefix="/files")
 
 # 文件上传
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(get_current_user)])
 async def upload_file(file: UploadFile = File(...)):
     """
     上传单个文件

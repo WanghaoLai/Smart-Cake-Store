@@ -1,5 +1,7 @@
 import {createRouter, createWebHistory} from 'vue-router'
 
+const WHITE_LIST = ['/login', '/register']
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -26,6 +28,23 @@ const router = createRouter({
     { path: '/login', component: () => import('@/views/Login.vue')},
     { path: '/register', component: () => import('@/views/Register.vue')},
   ]
+})
+
+router.beforeEach((to, from, next) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+        if (to.path === '/login') {
+            next('/manager/home')
+        } else {
+            next()
+        }
+    } else {
+        if (WHITE_LIST.includes(to.path)) {
+            next()
+        } else {
+            next('/login')
+        }
+    }
 })
 
 export default router
