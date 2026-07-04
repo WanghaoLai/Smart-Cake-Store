@@ -62,6 +62,7 @@ class Address(Model):
 
 class Orders(Model):
     id = fields.IntField(pk=True, null=False)
+    order_no = fields.CharField(max_length=255, null=True)
     num = fields.IntField(null=True)
     user = fields.ForeignKeyField('models.User', null=True)
     goods = fields.ForeignKeyField('models.Goods', null=True)

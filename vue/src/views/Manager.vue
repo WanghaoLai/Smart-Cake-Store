@@ -150,6 +150,7 @@ const updateUser = () => {
 
 const logout = () => {
   ElMessage.success('退出成功')
+  localStorage.removeItem('token')
   localStorage.removeItem('system-user')
   router.push('/login')
 }
