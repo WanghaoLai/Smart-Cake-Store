@@ -3,7 +3,7 @@
     <div class="card" style="padding: 30px">
       <el-form ref="formRef" :model="data.user" :rules="data.rules" label-width="100px" style="padding-right: 50px">
         <div style="margin: 20px 0; text-align: center">
-          <el-upload :show-file-list="false" class="avatar-uploader" :action="uploadUrl" :on-success="handleFileUpload">
+          <el-upload :show-file-list="false" class="avatar-uploader" :action="uploadUrl" :on-success="handleFileUpload" :headers="uploadHeaders">
             <img v-if="data.user.avatar" :src="data.user.avatar" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
@@ -29,6 +29,7 @@ import {ElMessage} from "element-plus";
 
 // 文件上传的接口地址
 const uploadUrl = import.meta.env.VITE_BASE_URL + '/files/upload'
+const uploadHeaders = { Authorization: `Bearer ${localStorage.getItem('token')}` }
 
 const formRef = ref()
 const data = reactive({
