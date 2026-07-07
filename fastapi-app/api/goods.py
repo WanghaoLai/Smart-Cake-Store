@@ -7,16 +7,14 @@ from tortoise.contrib.pydantic import pydantic_model_creator
 from common.auth import get_current_user
 from common.result import Result, PageInfo
 from models import Goods
+from services.knowledge_service import knowledge_service
 
 router = APIRouter(prefix="/goods", dependencies=[Depends(get_current_user)])
 
-# 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
 GoodsPydantic = pydantic_model_creator(Goods)
-# 自动生成所有字段为 Optional 的更新模型
 GoodsCreatePydantic = create_model(
     "GoodsPydantic",
     **{
-        # 从只读模型中读取所有字段然后给它设置成可选
         name: (Optional[field.annotation], None)
         for name, field in GoodsPydantic.model_fields.items()
     },
@@ -27,7 +25,9 @@ GoodsCreatePydantic = create_model(
 @router.post("/add")
 async def add(goods_pydantic: GoodsCreatePydantic):
     create_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
-    await Goods.create(**create_data)
+    goods = await Goods.create(**create_data)
+    await goods.fetch_related('category')
+    knowledge_service.sync_goods(goods)
     return Result.success()
 
 
@@ -35,11 +35,15 @@ async def add(goods_pydantic: GoodsCreatePydantic):
 async def update(goods_pydantic: GoodsCreatePydantic):
     update_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
     await Goods.filter(id=goods_pydantic.id).update(**update_data)
+    goods = await Goods.get(id=goods_pydantic.id).prefetch_related('category')
+    knowledge_service.sync_goods(goods)
     return Result.success()
+
 
 @router.delete("/delete/{goods_id}")
 async def delete(goods_id: int):
     await Goods.filter(id=goods_id).delete()
+    knowledge_service.remove_goods(goods_id)
     return Result.success()
 
 @router.get("/selectPage")

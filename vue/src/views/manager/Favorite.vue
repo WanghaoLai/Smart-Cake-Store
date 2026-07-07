@@ -12,9 +12,7 @@
             <img :src="item.img" alt="" style="width: 100%; height: 300px; border-radius: 5px">
             <div>
               <div style="font-weight: bold; font-size: 16px">{{ item.name }}</div>
-              <el-tooltip :content="item.description" placement="top" effect="light">
-                <div style="margin-top: 5px" class="line1">简介：{{ item.description }}</div>
-              </el-tooltip>
+              <div style="margin-top: 5px" class="line1" :title="item.description">简介：{{ item.description }}</div>
               <div style="margin-top: 10px; display: flex">
                 <div style="color: red; font-weight: bold; flex: 1">价格：￥{{ item.price }}</div>
                 <div style="flex: 1; text-align: right">剩余{{ item.num }}{{ item.unit }}</div>

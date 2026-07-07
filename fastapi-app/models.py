@@ -114,4 +114,16 @@ class Favorite(Model):
         table = 'favorite'
 
 
+class Knowledge(Model):
+    id = fields.IntField(pk=True, null=False)
+    filename = fields.CharField(max_length=255, null=True)
+    original_name = fields.CharField(max_length=255, null=True)
+    file_size = fields.IntField(null=True)
+    chunk_count = fields.IntField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'knowledge'
+
+
 

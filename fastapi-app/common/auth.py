@@ -1,28 +1,30 @@
 """JWT 认证与密码哈希模块"""
 from datetime import datetime, timedelta
 
+import bcrypt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from settings import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_HOURS
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = HTTPBearer()
 
 
 def hash_password(plaintext: str) -> str:
-    return pwd_context.hash(plaintext)
+    data = plaintext.encode("utf-8")[:72]
+    return bcrypt.hashpw(data, bcrypt.gensalt()).decode()
 
 
 def verify_password(plaintext: str, stored: str) -> tuple:
     """校验密码，返回 (is_valid, needs_upgrade)。
     needs_upgrade 为 True 表示密码是明文匹配的，需要升级为 bcrypt。
     """
+    data = plaintext.encode("utf-8")[:72]
+
     # 先尝试 bcrypt 验证
     try:
-        if pwd_context.verify(plaintext, stored):
+        if bcrypt.checkpw(data, stored.encode()):
             return True, False
     except (ValueError, TypeError):
         pass

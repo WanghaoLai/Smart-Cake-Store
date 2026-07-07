@@ -9,7 +9,8 @@ from common.auth import get_current_user
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Conversation, Message, User, Goods
-from services import LLMService, RAGService, ChatService
+from services import LLMService, ChatService
+from services.knowledge_service import knowledge_service
 from settings import AI_CONFIG
 
 router = APIRouter(prefix="/chat", dependencies=[Depends(get_current_user)])
@@ -18,8 +19,7 @@ llm_service = LLMService(
     api_key=AI_CONFIG["dashscope_api_key"],
     model=AI_CONFIG["model"]
 )
-rag_service = RAGService(embedding_model=AI_CONFIG["embedding_model"])
-chat_service = ChatService(llm_service, rag_service)
+chat_service = ChatService(llm_service, knowledge_service)
 
 
 class ConversationCreate(BaseModel):
@@ -121,7 +121,8 @@ async def delete_conversation(conversation_id: int):
 
 @router.post("/rebuild-index")
 async def rebuild_index():
-    """重建 RAG 向量索引"""
+    """重建商品向量索引 + 知识库统计"""
     goods_list = await Goods.all().prefetch_related('category')
-    rag_service.build_index(goods_list)
-    return Result.success({"count": len(goods_list)})
+    knowledge_service.sync_all_goods(goods_list)
+    stats = knowledge_service.get_stats()
+    return Result.success(stats)
