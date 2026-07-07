@@ -103,6 +103,10 @@
             <el-icon><Monitor /></el-icon>
             <span>公告管理</span>
           </el-menu-item>
+          <el-menu-item index="/manager/knowledge" v-if="data.user.role === '管理员'">
+            <el-icon><Document /></el-icon>
+            <span>知识库管理</span>
+          </el-menu-item>
           <el-menu-item index="/manager/chat">
             <el-icon><ChatDotRound /></el-icon>
             <span>智能客服</span>

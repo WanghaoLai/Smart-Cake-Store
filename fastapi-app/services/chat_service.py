@@ -1,15 +1,14 @@
 import re
 from .llm_service import LLMService
-from .rag_service import RAGService
+from .knowledge_service import KnowledgeService
 from .customer_service_tools import TOOLS_MAP, TOOL_DEFINITIONS
-from models import Goods
 from settings import AI_CONFIG
 
 
 class ChatService:
-    def __init__(self, llm_service: LLMService, rag_service: RAGService):
+    def __init__(self, llm_service: LLMService, knowledge_service: KnowledgeService = None):
         self.llm = llm_service
-        self.rag = rag_service
+        self.knowledge = knowledge_service or KnowledgeService()
         self.system_prompt = f"""你是 Little-bear Cake Store 的智能客服助手。
 
 你的职责：
@@ -39,19 +38,22 @@ class ChatService:
 
 回答要求：
 - 友好、专业、简洁
+- 当消息中包含"参考信息"时，优先基于参考信息中的知识库内容回答
 - 基于工具返回的真实信息回答
 - 如果不确定，诚实告知用户
 - 适当使用 emoji 增加亲和力"""
 
     async def process_message(self, user_message: str, history: list, user_id: int = None) -> str:
         """处理用户消息（非流式）"""
-        messages = self._build_messages(history, user_message)
+        context = self._get_rag_context(user_message)
+        messages = self._build_messages(history, user_message, context)
         response = await self.llm.chat(messages, self.system_prompt)
         return await self._handle_tool_calls(response, messages, user_id)
 
     async def process_message_stream(self, user_message: str, history: list, user_id: int = None):
-        """处理用户消息（流式），支持工具调用"""
-        messages = self._build_messages(history, user_message)
+        """处理用户消息（流式），RAG 上下文 + 工具结果合并注入"""
+        rag_context = self._get_rag_context(user_message)
+        messages = self._build_messages(history, user_message, rag_context)
 
         first_response = await self.llm.chat(messages, self.system_prompt)
 
@@ -63,13 +65,38 @@ class ChatService:
                 tool_results.append(result)
 
             messages.append({"role": "assistant", "content": "正在查询数据..."})
-            messages.append({"role": "user", "content": f"工具执行结果：\n{chr(10).join(tool_results)}\n\n请基于这些结果直接回答用户。"})
+            messages.append({"role": "user", "content": self._format_tool_response(tool_results, rag_context)})
 
             async for chunk in self.llm.chat_stream(messages, self.system_prompt):
                 yield chunk
         else:
             for char in first_response:
                 yield char
+
+    def _get_rag_context(self, query: str) -> str:
+        """从 ChromaDB 知识库和商品向量库检索相关上下文"""
+        try:
+            results = self.knowledge.search(query, top_k=3)
+            if not results:
+                return ""
+
+            doc_parts = []
+            goods_parts = []
+            for r in results:
+                if r.get("source") == "goods_base":
+                    goods_parts.append(f"- {r['content']}")
+                else:
+                    doc_parts.append(f"- {r['content']}")
+
+            context = ""
+            if goods_parts:
+                context += "相关商品信息：\n" + "\n".join(goods_parts) + "\n\n"
+            if doc_parts:
+                context += "相关知识库信息：\n" + "\n".join(doc_parts) + "\n\n"
+            return context.strip()
+        except Exception:
+            pass
+        return ""
 
     def _parse_tool_calls(self, text: str) -> list:
         """解析 [TOOL_CALL:name:params] 格式"""
@@ -101,7 +128,7 @@ class ChatService:
             return f"[{tool_name}] 执行失败：{str(e)}"
 
     async def _handle_tool_calls(self, response: str, messages: list, user_id: int = None) -> str:
-        """处理工具调用并返回最终回答（非流式版本）"""
+        """处理工具调用并返回最终回答（非流式版本），RAG + 工具结果合并"""
         tool_calls = self._parse_tool_calls(response)
         if not tool_calls:
             return response
@@ -112,32 +139,31 @@ class ChatService:
             tool_results.append(result)
 
         messages.append({"role": "assistant", "content": "正在查询数据..."})
-        messages.append({"role": "user", "content": f"工具执行结果：\n{chr(10).join(tool_results)}\n\n请基于这些结果直接回答用户。"})
+        # RAG 上下文已在上游 _build_messages 时注入第一条 user message，
+        # 这里提取最后一条 user message 中的 context 用于合并提示
+        rag_context = self._extract_context_from_messages(messages)
+        messages.append({"role": "user", "content": self._format_tool_response(tool_results, rag_context)})
 
         return await self.llm.chat(messages, self.system_prompt)
 
-    async def _get_context(self, query: str) -> str:
-        """获取相关上下文"""
-        # if self._need_rag(query):
-        #     results = self.rag.search(query, top_k=3)
-        #     if results:
-        #         context = "以下是相关的商品信息：\n\n"
-        #         for i, r in enumerate(results, 1):
-        #             context += f"{i}. {r['content']}\n\n"
-        #         return context
-        return await self._direct_query(query)
-
-    # def _need_rag(self, query: str) -> bool:
-    #     """判断是否需要 RAG 检索"""
-    #     rag_keywords = ['推荐', '有什么', '哪些', '介绍', '口味', '适合', '建议', '生日', '情侣', '送']
-    #     return any(keyword in query for keyword in rag_keywords)
-
-    async def _direct_query(self, query: str) -> str:
-        """直接数据库查询"""
-        goods = await Goods.filter(name__contains=query).first()
-        if goods:
-            return f"商品信息：{goods.name}，价格：{goods.price}元，描述：{goods.description}"
+    def _extract_context_from_messages(self, messages: list) -> str:
+        """从消息列表中提取 RAG 上下文（位于最后一条 user message 的 '参考信息：' 之后）"""
+        for msg in reversed(messages):
+            if msg.get("role") == "user" and "参考信息：" in msg.get("content", ""):
+                parts = msg["content"].split("参考信息：", 1)
+                return parts[1].strip() if len(parts) > 1 else ""
         return ""
+
+    def _format_tool_response(self, tool_results: list, rag_context: str = "") -> str:
+        """格式化工具执行结果，与 RAG 上下文合并引导 LLM 综合回答"""
+        msg = f"工具执行结果：\n{chr(10).join(tool_results)}\n\n"
+        if rag_context:
+            msg += (
+                "另外，以下是之前检索到的参考信息，可能对回答有帮助：\n"
+                f"{rag_context}\n\n"
+            )
+        msg += "请综合以上工具查询结果和参考信息，完整、准确地回答用户的问题。"
+        return msg
 
     def _build_messages(self, history: list, user_message: str, context: str = "") -> list:
         """构建消息列表"""

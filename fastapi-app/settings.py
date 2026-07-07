@@ -11,7 +11,7 @@ TORTOISE_ORM = {
                 "minsize": 1,
                 "maxsize": 10,
                 "charset": "utf8mb4",
-                "echo": True
+                "echo": False
             }
         },
     },

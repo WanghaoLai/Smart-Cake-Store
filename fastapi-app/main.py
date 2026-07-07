@@ -31,5 +31,5 @@ async def root():
     return Result.success()
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", reload=True, port=9090)
+    uvicorn.run("main:app", reload=True, port=9090, reload_dirs=["api", "common", "services"])
 
