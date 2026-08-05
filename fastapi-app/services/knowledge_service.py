@@ -9,6 +9,7 @@ from chromadb.config import Settings as ChromaSettings
 from dashscope import TextEmbedding
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from models import Goods, IndexTask
 from settings import AI_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ CHROMA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_d
 
 DOC_COLLECTION = "knowledge_base"
 GOODS_COLLECTION = "goods_base"
+
+INDEX_TASK_MAX_ATTEMPTS = 3
 
 
 class KnowledgeService:
@@ -230,6 +233,60 @@ class KnowledgeService:
         doc_count = self.collection.count()
         goods_count = self.goods_collection.count()
         return {"document_chunks": doc_count, "goods_count": goods_count, "total_chunks": doc_count + goods_count}
+
+    # ==================== Outbox 索引任务 ====================
+
+    async def process_index_task(self, task_id: int) -> None:
+        """处理单条索引任务，带边界重试。
+        - sync_goods / remove_goods 是幂等的，重试安全
+        - 超过 INDEX_TASK_MAX_ATTEMPTS 后置为 failed，待管理员通过 run-pending 兜底
+        """
+        task = await IndexTask.get_or_none(id=task_id)
+        if task is None or task.status == 'done':
+            return
+        if task.attempts >= INDEX_TASK_MAX_ATTEMPTS:
+            return
+
+        try:
+            if task.entity_type == 'goods' and task.action == 'upsert':
+                goods = await Goods.get_or_none(id=task.entity_id).prefetch_related('category')
+                if goods is not None:
+                    self.sync_goods(goods)
+                # goods 已被删除则视为完成，避免悬空任务
+            elif task.entity_type == 'goods' and task.action == 'delete':
+                self.remove_goods(task.entity_id)
+            # 未知 entity/action 一律视为完成，防止无限重试
+
+            await IndexTask.filter(id=task.id).update(
+                status='done',
+                attempts=task.attempts + 1,
+                last_error=None,
+            )
+        except Exception as e:
+            new_attempts = task.attempts + 1
+            await IndexTask.filter(id=task.id).update(
+                status='failed' if new_attempts >= INDEX_TASK_MAX_ATTEMPTS else 'pending',
+                attempts=new_attempts,
+                last_error=str(e)[:500],
+            )
+            logger.warning("index task %s failed (attempt %d/%d): %s",
+                           task_id, new_attempts, INDEX_TASK_MAX_ATTEMPTS, e)
+            raise
+
+    async def run_pending_tasks(self, limit: int = 100) -> dict:
+        """兜底批处理：扫描 pending/failed 任务依次重跑，返回统计。"""
+        tasks = await IndexTask.filter(
+            status__in=['pending', 'failed']
+        ).order_by('id').limit(limit)
+        succeeded = 0
+        failed = 0
+        for t in tasks:
+            try:
+                await self.process_index_task(t.id)
+                succeeded += 1
+            except Exception:
+                failed += 1
+        return {'processed': len(tasks), 'succeeded': succeeded, 'failed': failed}
 
 
 knowledge_service = KnowledgeService()

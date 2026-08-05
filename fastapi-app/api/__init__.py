@@ -59,6 +59,7 @@ async def login(account: Account):
         "name": user.name,
         "avatar": user.avatar,
         "role": account.role,
+        "must_change_password": bool(getattr(user, 'must_change_password', False)),
     }
     return Result.success({"token": token, "user": user_data})
 
@@ -83,28 +84,30 @@ async def register(account: Account):
 # 修改密码
 @api_router.put("/updatePassword")
 async def update_password(account: Account, current_user: dict = Depends(get_current_user)):
-    if account.role == '管理员':
-        admin = await Admin.get(id=account.id)
+    # 账号 ID 与角色一律以 JWT 为准，不信任请求体
+    user_id = current_user["user_id"]
+    role = current_user["role"]
+
+    if role == '管理员':
+        admin = await Admin.get_or_none(id=user_id)
         if admin is None:
             raise CustomException("未找到用户")
         is_valid, _ = verify_password(account.password, admin.password)
         if not is_valid:
             raise CustomException("原密码错误")
-        new_hashed = hash_password(account.newPassword)
         if verify_password(account.newPassword, admin.password)[0]:
             raise CustomException("新密码不能原密码跟相同")
-        await Admin.filter(id=admin.id).update(password=new_hashed)
-    if account.role == '用户':
-        user = await User.get(id=account.id)
+        await Admin.filter(id=user_id).update(password=hash_password(account.newPassword), must_change_password=False)
+    else:
+        user = await User.get_or_none(id=user_id)
         if user is None:
             raise CustomException("未找到用户")
         is_valid, _ = verify_password(account.password, user.password)
         if not is_valid:
             raise CustomException("原密码错误")
-        new_hashed = hash_password(account.newPassword)
         if verify_password(account.newPassword, user.password)[0]:
             raise CustomException("新密码不能原密码跟相同")
-        await User.filter(id=user.id).update(password=new_hashed)
+        await User.filter(id=user_id).update(password=hash_password(account.newPassword), must_change_password=False)
     return Result.success()
 
 

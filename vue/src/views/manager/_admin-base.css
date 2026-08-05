@@ -1,0 +1,226 @@
+/* ==========================================================================
+   管理后台通用样式 —— 表格 / 工具条 / 对话框 / 分页
+   在各个 admin 页面通过 @import './_admin-base.css'; 引入
+   ========================================================================== */
+
+.admin-page {
+  padding: 20px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* —— 工具条 —— */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  flex-wrap: wrap;
+}
+
+.toolbar-search {
+  max-width: 280px;
+  min-width: 200px;
+}
+
+.toolbar-search :deep(.el-input__wrapper),
+.toolbar :deep(.el-select .el-input__wrapper) {
+  border-radius: var(--r-pill);
+}
+
+.toolbar-right {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* —— 表格卡片 —— */
+.table-card {
+  padding: 4px;
+  overflow: hidden;
+}
+
+.admin-table {
+  --el-table-border-color: var(--c-border-light);
+  --el-table-header-bg-color: var(--c-bg-soft);
+  --el-table-row-hover-bg-color: var(--c-primary-soft);
+}
+
+.admin-table :deep(thead tr th) {
+  font-weight: 600;
+  color: var(--c-text-primary);
+  font-size: 13px;
+  background: var(--c-bg-soft);
+}
+
+.admin-table :deep(.el-table__row td) {
+  font-size: 13px;
+  color: var(--c-text-regular);
+  padding: 10px 0;
+}
+
+/* —— 表格内单元格 —— */
+.cell-with-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cell-icon {
+  color: var(--c-primary);
+  font-size: 16px;
+}
+
+.cell-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--c-border-light);
+}
+
+.cell-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.cell-price {
+  color: var(--c-primary);
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.cell-stock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--c-success-soft);
+  color: var(--c-success);
+}
+
+.cell-stock.warn {
+  background: var(--c-warning-soft);
+  color: var(--c-warning);
+}
+
+.cell-stock.empty {
+  background: var(--c-info-soft);
+  color: var(--c-info);
+}
+
+.cell-role {
+  display: inline-flex;
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cell-role.admin {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.cell-role.user {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+/* —— 分页 —— */
+.pagination-card {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+}
+
+/* —— 对话框 —— */
+.dialog-header-custom {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.dialog-icon {
+  width: 40px;
+  height: 40px;
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--c-text-primary);
+}
+
+.dialog-sub {
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  margin-top: 2px;
+}
+
+/* —— 上传 —— */
+.avatar-uploader :deep(.el-upload) {
+  border: 1px dashed var(--c-border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all var(--t-fast) var(--ease-out);
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatar-uploader :deep(.el-upload:hover) {
+  border-color: var(--c-primary);
+  background: var(--c-primary-soft);
+}
+
+.avatar-uploader .avatar {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-uploader-icon {
+  font-size: 28px;
+  color: var(--c-text-placeholder);
+}
+
+/* —— 全局弹窗圆角 —— */
+:deep(.el-dialog) {
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+:deep(.el-dialog__header) {
+  padding: 22px 24px 14px;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+:deep(.el-dialog__body) {
+  padding: 8px 24px 20px;
+}
+
+:deep(.el-dialog__footer) {
+  padding: 8px 24px 22px;
+  border-top: none;
+}

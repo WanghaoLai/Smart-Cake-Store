@@ -9,7 +9,7 @@ class ChatService:
     def __init__(self, llm_service: LLMService, knowledge_service: KnowledgeService = None):
         self.llm = llm_service
         self.knowledge = knowledge_service or KnowledgeService()
-        self.system_prompt = f"""你是 Little-bear Cake Store 的智能客服助手。
+        self.system_prompt = f"""你是 甜心烘焙（Sweet Hearts Bakery）的智能客服助手。
 
 你的职责：
 1. 回答用户关于蛋糕商品的问题（口味、价格、描述等）

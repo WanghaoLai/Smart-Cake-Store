@@ -1,4 +1,6 @@
 """智能客服工具集"""
+from tortoise.transactions import in_transaction
+
 from models import Orders, Goods
 
 TOOL_DEFINITIONS = """
@@ -41,25 +43,31 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
 
 
 async def cancel_order(user_id: int, order_id: int = None, order_no: str = None) -> str:
-    if order_id:
-        order = await Orders.filter(id=order_id, user_id=user_id).prefetch_related("goods").first()
-    elif order_no:
-        order = await Orders.filter(order_no=order_no, user_id=user_id).prefetch_related("goods").first()
-    else:
+    if not (order_id or order_no):
         return "请提供订单ID或订单号。"
-    if not order:
-        return f"未找到该订单，无法取消。请确认订单号是否正确。"
 
-    goods = order.goods
-    num = order.num
+    # 库存恢复 + 订单删除必须在同一事务同一行锁内完成，防止并发恢复错乱
+    async with in_transaction():
+        if order_id:
+            order = await Orders.filter(id=order_id, user_id=user_id).select_for_update().first()
+        else:
+            order = await Orders.filter(order_no=order_no, user_id=user_id).select_for_update().first()
 
-    await order.delete()
+        if not order:
+            return "未找到该订单，无法取消。请确认订单号是否正确。"
 
-    if goods:
-        goods.num += num
-        await goods.save()
+        goods_name = None
+        if order.goods_id:
+            goods = await Goods.filter(id=order.goods_id).select_for_update().first()
+            if goods:
+                goods.num += order.num
+                await goods.save(update_fields=['num'])
+                goods_name = goods.name
 
-    return f"订单 {order.order_no or order.id} 已成功取消，{goods.name if goods else '商品'} 库存已恢复。"
+        order_label = order.order_no or order.id
+        await Orders.filter(id=order.id).delete()
+
+    return f"订单 {order_label} 已成功取消，{goods_name or '商品'} 库存已恢复。"
 
 
 async def recommend_cake(preference: str = "") -> str:

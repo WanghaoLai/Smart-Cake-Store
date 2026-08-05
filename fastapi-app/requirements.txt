@@ -1,18 +1,27 @@
+# ---- Web 框架 ----
 fastapi~=0.124.2
 uvicorn~=0.38.0
-tortoise~=0.0.3
-tortoise-orm~=0.25.1
-python-multipart~=0.0.20
 starlette~=0.50.0
+python-multipart~=0.0.20
+
+# ---- ORM / MySQL ----
+tortoise-orm~=0.25.1
 aiomysql~=0.3.2
+
+# ---- 配置 / 校验 ----
 pydantic~=2.12.5
-cryptography
+python-dotenv~=1.0.0
+cryptography>=42.0.0
+
+# ---- LLM / Embedding ----
 dashscope>=1.10.0
-faiss-cpu>=1.7.4
-numpy>=1.24.0
+
+# ---- 向量库 / RAG ----
+chromadb>=0.4.0
+langchain-text-splitters>=0.2.0
+PyPDF2>=3.0.0
+python-docx>=0.8.0
+
+# ---- 鉴权 ----
 python-jose[cryptography]>=3.3.0
 bcrypt<5
-chromadb>=0.4.0
-python-docx>=0.8.0
-PyPDF2>=3.0.0
-langchain-text-splitters>=0.2.0

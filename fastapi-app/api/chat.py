@@ -131,8 +131,26 @@ async def delete_conversation(conversation_id: int, current_user: dict = Depends
 
 @router.post("/rebuild-index", dependencies=[Depends(get_current_admin)])
 async def rebuild_index():
-    """重建商品向量索引 + 知识库统计"""
+    """全量重建商品向量索引 + 知识库统计。
+    适用于 ChromaDB 损坏、模型升级等场景；重建后已 pending 的 IndexTask 仍可由 /index/run-pending 兜底。"""
     goods_list = await Goods.all().prefetch_related('category')
     knowledge_service.sync_all_goods(goods_list)
     stats = knowledge_service.get_stats()
     return Result.success(stats)
+
+
+@router.post("/index/run-pending", dependencies=[Depends(get_current_admin)])
+async def run_pending_index_tasks():
+    """兜底重跑 outbox 中 pending/failed 的索引任务（BackgroundTasks 进程崩溃或外部 API 故障后）。"""
+    result = await knowledge_service.run_pending_tasks(limit=100)
+    return Result.success(result)
+
+
+@router.get("/index/stats", dependencies=[Depends(get_current_admin)])
+async def index_stats():
+    """返回 IndexTask 各状态计数，用于诊断 outbox 健康度。"""
+    from models import IndexTask
+    pending = await IndexTask.filter(status='pending').count()
+    failed = await IndexTask.filter(status='failed').count()
+    done = await IndexTask.filter(status='done').count()
+    return Result.success({"pending": pending, "failed": failed, "done": done})

@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.transactions import in_transaction
 
 from common.auth import get_current_user
 from common.exception_handler import CustomException
@@ -31,30 +32,55 @@ OrdersCreatePydantic = create_model(
 
 @router.post("/add")
 async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depends(get_current_user)):
-    create_data = orders_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
-    create_data['user_id'] = current_user["user_id"]
+    if orders_pydantic.goods_id is None:
+        raise CustomException("请选择要购买的商品")
+    if orders_pydantic.num is None or orders_pydantic.num <= 0:
+        raise CustomException("购买数量必须大于 0")
+
     now = datetime.now()
-    create_data['time'] = now.strftime('%Y-%m-%d %H:%M:%S')
-    create_data['order_no'] = now.strftime('%Y%m%d%H%M%S') + str(random.randint(1000, 9999))
-    await Orders.create(**create_data)
-    # 更新一下商品表的库存
-    goods = await Goods.filter(id=orders_pydantic.goods_id).first()
-    goods.num = goods.num - orders_pydantic.num
-    await goods.save()
+    order_no = now.strftime('%Y%m%d%H%M%S') + str(random.randint(1000, 9999))
+    time_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 库存校验、订单写入、库存扣减必须在同一事务同一行锁内完成，否则并发超卖
+    async with in_transaction():
+        goods = await Goods.filter(id=orders_pydantic.goods_id).select_for_update().first()
+        if goods is None:
+            raise CustomException("商品不存在")
+        if goods.num < orders_pydantic.num:
+            raise CustomException(f"库存不足，剩余 {goods.num} {goods.unit or '个'}")
+
+        await Orders.create(
+            user_id=current_user["user_id"],
+            goods_id=orders_pydantic.goods_id,
+            address_id=orders_pydantic.address_id,
+            num=orders_pydantic.num,
+            time=time_str,
+            order_no=order_no,
+        )
+        goods.num -= orders_pydantic.num
+        await goods.save(update_fields=['num'])
+
     return Result.success()
 
 
 @router.delete("/delete/{id}")
 async def delete(id: int, current_user: dict = Depends(get_current_user)):
-    order = await Orders.filter(id=id).prefetch_related("goods").first()
-    if order is None:
-        raise CustomException("订单不存在")
-    if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
-        raise CustomException("无权操作该订单")
-    if order.goods:
-        order.goods.num += order.num
-        await order.goods.save()
-    await Orders.filter(id=id).delete()
+    # 归属校验 + 库存恢复 + 订单删除原子化
+    async with in_transaction():
+        order = await Orders.filter(id=id).select_for_update().first()
+        if order is None:
+            raise CustomException("订单不存在")
+        if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
+            raise CustomException("无权操作该订单")
+
+        if order.goods_id:
+            goods = await Goods.filter(id=order.goods_id).select_for_update().first()
+            if goods:
+                goods.num += order.num
+                await goods.save(update_fields=['num'])
+
+        await Orders.filter(id=id).delete()
+
     return Result.success()
 
 
@@ -94,4 +120,3 @@ async def select(goodsName: str = "", userId: int = 0,  pageNum: int = 1, pageSi
     # 封装分页数据
     pageinfo = PageInfo(total=total, list=orders_list)
     return Result.success(pageinfo)
-
