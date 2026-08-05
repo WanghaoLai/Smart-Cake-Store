@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from common.auth import get_current_user
+from common.auth import get_current_user, get_current_admin
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Conversation, Message, User, Goods
@@ -54,8 +54,19 @@ async def get_conversations(current_user: dict = Depends(get_current_user)):
     return Result.success(result)
 
 
+async def _check_conversation_owner(conversation_id: int, current_user: dict) -> Conversation:
+    """校验会话归属：本人或管理员可访问，否则抛异常。"""
+    conversation = await Conversation.get_or_none(id=conversation_id)
+    if conversation is None:
+        raise CustomException("会话不存在")
+    if current_user["role"] != "管理员" and conversation.user_id != current_user["user_id"]:
+        raise CustomException("无权访问该会话")
+    return conversation
+
+
 @router.get("/messages/{conversation_id}")
-async def get_messages(conversation_id: int):
+async def get_messages(conversation_id: int, current_user: dict = Depends(get_current_user)):
+    await _check_conversation_owner(conversation_id, current_user)
     messages = await Message.filter(conversation_id=conversation_id).order_by("created_at")
     result = []
     for msg in messages:
@@ -70,9 +81,7 @@ async def get_messages(conversation_id: int):
 
 @router.post("/send")
 async def send_message(data: MessageRequest, current_user: dict = Depends(get_current_user)):
-    conversation = await Conversation.get_or_none(id=data.conversation_id)
-    if not conversation:
-        raise CustomException("会话不存在")
+    conversation = await _check_conversation_owner(data.conversation_id, current_user)
 
     await Message.create(
         conversation_id=data.conversation_id,
@@ -113,13 +122,14 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
 
 
 @router.delete("/conversation/{conversation_id}")
-async def delete_conversation(conversation_id: int):
+async def delete_conversation(conversation_id: int, current_user: dict = Depends(get_current_user)):
+    await _check_conversation_owner(conversation_id, current_user)
     await Message.filter(conversation_id=conversation_id).delete()
     await Conversation.filter(id=conversation_id).delete()
     return Result.success()
 
 
-@router.post("/rebuild-index")
+@router.post("/rebuild-index", dependencies=[Depends(get_current_admin)])
 async def rebuild_index():
     """重建商品向量索引 + 知识库统计"""
     goods_list = await Goods.all().prefetch_related('category')

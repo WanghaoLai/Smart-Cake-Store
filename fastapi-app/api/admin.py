@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends
 from pydantic import create_model
 from tortoise.contrib.pydantic import pydantic_model_creator
 
-from common.auth import get_current_user, hash_password
+from common.auth import get_current_admin, hash_password
 from common.exception_handler import CustomException
 from common.result import Result, PageInfo
 from models import Admin
 
-router = APIRouter(prefix="/admin", dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/admin", dependencies=[Depends(get_current_admin)])
 AdminPydantic = pydantic_model_creator(Admin)
 AdminCreatePydantic = create_model(
     "AdminPydantic",

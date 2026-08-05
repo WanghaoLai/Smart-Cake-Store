@@ -7,6 +7,7 @@ from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 
 from common.auth import get_current_user
+from common.exception_handler import CustomException
 from common.result import Result, PageInfo
 from models import Orders, Goods
 
@@ -29,8 +30,9 @@ OrdersCreatePydantic = create_model(
 
 
 @router.post("/add")
-async def add(orders_pydantic: OrdersCreatePydantic):
-    create_data = orders_pydantic.model_dump(exclude_unset=True, exclude={'id'})
+async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depends(get_current_user)):
+    create_data = orders_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
+    create_data['user_id'] = current_user["user_id"]
     now = datetime.now()
     create_data['time'] = now.strftime('%Y-%m-%d %H:%M:%S')
     create_data['order_no'] = now.strftime('%Y%m%d%H%M%S') + str(random.randint(1000, 9999))
@@ -43,9 +45,13 @@ async def add(orders_pydantic: OrdersCreatePydantic):
 
 
 @router.delete("/delete/{id}")
-async def delete(id: int):
+async def delete(id: int, current_user: dict = Depends(get_current_user)):
     order = await Orders.filter(id=id).prefetch_related("goods").first()
-    if order and order.goods:
+    if order is None:
+        raise CustomException("订单不存在")
+    if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
+        raise CustomException("无权操作该订单")
+    if order.goods:
         order.goods.num += order.num
         await order.goods.save()
     await Orders.filter(id=id).delete()
@@ -53,7 +59,11 @@ async def delete(id: int):
 
 
 @router.get("/selectPage")
-async def select(goodsName: str = "", userId: int = 0,  pageNum: int = 1, pageSize: int = 5):
+async def select(goodsName: str = "", userId: int = 0,  pageNum: int = 1, pageSize: int = 5,
+                 current_user: dict = Depends(get_current_user)):
+    # 普通用户强制仅能查自己的订单，防止越权查询他人订单
+    if current_user["role"] != "管理员":
+        userId = current_user["user_id"]
     # 同时获取分页数据和总数
     query = Orders.filter()
     if userId > 0:

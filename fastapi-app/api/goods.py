@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 
-from common.auth import get_current_user
+from common.auth import get_current_user, get_current_admin
 from common.result import Result, PageInfo
 from models import Goods
 from services.knowledge_service import knowledge_service
@@ -22,7 +22,7 @@ GoodsCreatePydantic = create_model(
 )
 
 
-@router.post("/add")
+@router.post("/add", dependencies=[Depends(get_current_admin)])
 async def add(goods_pydantic: GoodsCreatePydantic):
     create_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
     goods = await Goods.create(**create_data)
@@ -31,7 +31,7 @@ async def add(goods_pydantic: GoodsCreatePydantic):
     return Result.success()
 
 
-@router.put("/update")
+@router.put("/update", dependencies=[Depends(get_current_admin)])
 async def update(goods_pydantic: GoodsCreatePydantic):
     update_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
     await Goods.filter(id=goods_pydantic.id).update(**update_data)
@@ -40,7 +40,7 @@ async def update(goods_pydantic: GoodsCreatePydantic):
     return Result.success()
 
 
-@router.delete("/delete/{goods_id}")
+@router.delete("/delete/{goods_id}", dependencies=[Depends(get_current_admin)])
 async def delete(goods_id: int):
     await Goods.filter(id=goods_id).delete()
     knowledge_service.remove_goods(goods_id)
