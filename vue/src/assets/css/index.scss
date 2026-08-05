@@ -1,7 +1,32 @@
-@forward "element-plus/theme-chalk/src/common/var.scss" with ($colors: (
-    "primary": ("base": #1967e3),
-    "success": ("base": #239113),
-    "warning": ("base": #F9B44C),
-    "danger": ("base": #F64848),
-    "info": ("base": #535edd),
-));
+@forward "element-plus/theme-chalk/src/common/var.scss" with (
+    $colors: (
+        "primary": ("base": #a88a3f),
+        "success": ("base": #5e8a2f),
+        "warning": ("base": #b58220),
+        "danger": ("base": #b05450),
+        "info": ("base": #6e6558),
+    ),
+    $border-radius: (
+        "base": 10px,
+        "small": 8px,
+        "round": 14px,
+        "circle": 100%,
+    ),
+    $bg-color: (
+        "": #fdfaf3,
+        "page": #f7f1e6,
+        "overlay": #ffffff,
+    ),
+    $text-color: (
+        "primary": #2e2a26,
+        "regular": #4a423a,
+        "secondary": #6e6558,
+        "placeholder": #998f7d,
+    ),
+    $border-color: (
+        "": #e5dcc4,
+        "light": #efe7d3,
+        "lighter": #f1e9d7,
+        "extra-light": #f7f1e6,
+    )
+);

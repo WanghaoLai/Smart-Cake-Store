@@ -1,21 +1,24 @@
+import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.transactions import in_transaction
 
+from common.auth import get_current_user, get_current_admin
 from common.result import Result, PageInfo
-from models import Goods
+from models import Goods, IndexTask
+from services.knowledge_service import knowledge_service
 
-router = APIRouter(prefix="/goods")
+logger = logging.getLogger(__name__)
 
-# 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
+router = APIRouter(prefix="/goods", dependencies=[Depends(get_current_user)])
+
 GoodsPydantic = pydantic_model_creator(Goods)
-# 自动生成所有字段为 Optional 的更新模型
 GoodsCreatePydantic = create_model(
     "GoodsPydantic",
     **{
-        # 从只读模型中读取所有字段然后给它设置成可选
         name: (Optional[field.annotation], None)
         for name, field in GoodsPydantic.model_fields.items()
     },
@@ -23,23 +26,55 @@ GoodsCreatePydantic = create_model(
 )
 
 
-@router.post("/add")
-async def add(goods_pydantic: GoodsCreatePydantic):
+async def _process_index_task_safe(task_id: int) -> None:
+    """BackgroundTasks 入口：吞掉异常防止任务栈污染。
+    失败时 IndexTask 表已记录 attempts/last_error，可由 /index/run-pending 兜底。"""
+    try:
+        await knowledge_service.process_index_task(task_id)
+    except Exception:
+        pass
+
+
+@router.post("/add", dependencies=[Depends(get_current_admin)])
+async def add(goods_pydantic: GoodsCreatePydantic, background_tasks: BackgroundTasks):
     create_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
-    await Goods.create(**create_data)
+    async with in_transaction():
+        goods = await Goods.create(**create_data)
+        task = await IndexTask.create(
+            entity_type='goods', entity_id=goods.id, action='upsert',
+        )
+    background_tasks.add_task(_process_index_task_safe, task.id)
     return Result.success()
 
 
-@router.put("/update")
-async def update(goods_pydantic: GoodsCreatePydantic):
+@router.put("/update", dependencies=[Depends(get_current_admin)])
+async def update(goods_pydantic: GoodsCreatePydantic, background_tasks: BackgroundTasks):
     update_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
-    await Goods.filter(id=goods_pydantic.id).update(**update_data)
+    async with in_transaction():
+        affected = await Goods.filter(id=goods_pydantic.id).update(**update_data)
+        task = None
+        if affected > 0:
+            task = await IndexTask.create(
+                entity_type='goods', entity_id=goods_pydantic.id, action='upsert',
+            )
+    if task is not None:
+        background_tasks.add_task(_process_index_task_safe, task.id)
     return Result.success()
 
-@router.delete("/delete/{goods_id}")
-async def delete(goods_id: int):
-    await Goods.filter(id=goods_id).delete()
+
+@router.delete("/delete/{goods_id}", dependencies=[Depends(get_current_admin)])
+async def delete(goods_id: int, background_tasks: BackgroundTasks):
+    async with in_transaction():
+        affected = await Goods.filter(id=goods_id).delete()
+        task = None
+        if affected > 0:
+            task = await IndexTask.create(
+                entity_type='goods', entity_id=goods_id, action='delete',
+            )
+    if task is not None:
+        background_tasks.add_task(_process_index_task_safe, task.id)
     return Result.success()
+
 
 @router.get("/selectPage")
 async def select(name: str = "", categoryId: int = 0, pageNum: int = 1, pageSize: int = 5):

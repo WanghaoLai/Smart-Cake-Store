@@ -1,13 +1,15 @@
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 
+from common.auth import get_current_user
+from common.exception_handler import CustomException
 from common.result import Result, PageInfo
 from models import Address
 
-router = APIRouter(prefix="/address")
+router = APIRouter(prefix="/address", dependencies=[Depends(get_current_user)])
 
 # 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
 AddressPydantic = pydantic_model_creator(Address)
@@ -23,34 +25,54 @@ AddressCreatePydantic = create_model(
 )
 
 @router.post("/add")
-async def add(address_pydantic: AddressCreatePydantic):
-    create_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id'})
+async def add(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_user)):
+    create_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
+    create_data['user_id'] = current_user["user_id"]
     await Address.create(**create_data)
     return Result.success()
 
 
 @router.put("/update")
-async def update(address_pydantic: AddressCreatePydantic):
-    update_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id'})
+async def update(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_user)):
+    if address_pydantic.id is None:
+        raise CustomException("地址ID不能为空")
+    target = await Address.get_or_none(id=address_pydantic.id)
+    if target is None:
+        raise CustomException("地址不存在")
+    if current_user["role"] != "管理员" and target.user_id != current_user["user_id"]:
+        raise CustomException("无权操作该地址")
+    update_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
     await Address.filter(id=address_pydantic.id).update(**update_data)
     return Result.success()
 
 
 @router.delete("/delete/{address_id}")
-async def delete(address_id: int):
+async def delete(address_id: int, current_user: dict = Depends(get_current_user)):
+    target = await Address.get_or_none(id=address_id)
+    if target is None:
+        raise CustomException("地址不存在")
+    if current_user["role"] != "管理员" and target.user_id != current_user["user_id"]:
+        raise CustomException("无权操作该地址")
     await Address.filter(id=address_id).delete()
     return Result.success()
 
 
 # 查询所有
 @router.get("/selectAll")
-async def select_all(userId: int):
+async def select_all(userId: int, current_user: dict = Depends(get_current_user)):
+    # 普通用户只能查询自己的地址
+    if current_user["role"] != "管理员":
+        userId = current_user["user_id"]
     address_list = await Address.filter(user_id=userId) # 模糊查询
     return Result.success(address_list)
 
 
 @router.get("/selectPage")
-async def select(address: str = "", userId: int = 0,  pageNum: int = 1, pageSize: int = 5):
+async def select(address: str = "", userId: int = 0,  pageNum: int = 1, pageSize: int = 5,
+                 current_user: dict = Depends(get_current_user)):
+    # 普通用户强制仅能查自己的地址
+    if current_user["role"] != "管理员":
+        userId = current_user["user_id"]
     # 同时获取分页数据和总数
     query = Address.filter(address__contains=address).prefetch_related('user')
     if userId > 0:

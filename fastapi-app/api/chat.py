@@ -1,25 +1,25 @@
 import json
 from typing import Optional
-from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from common.auth import get_current_user, get_current_admin
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Conversation, Message, User, Goods
-from services import LLMService, RAGService, ChatService
+from services import LLMService, ChatService
+from services.knowledge_service import knowledge_service
 from settings import AI_CONFIG
 
-router = APIRouter(prefix="/chat")
+router = APIRouter(prefix="/chat", dependencies=[Depends(get_current_user)])
 
 llm_service = LLMService(
     api_key=AI_CONFIG["dashscope_api_key"],
     model=AI_CONFIG["model"]
 )
-rag_service = RAGService(embedding_model=AI_CONFIG["embedding_model"])
-chat_service = ChatService(llm_service, rag_service)
+chat_service = ChatService(llm_service, knowledge_service)
 
 
 class ConversationCreate(BaseModel):
@@ -32,17 +32,17 @@ class MessageRequest(BaseModel):
 
 
 @router.post("/conversation")
-async def create_conversation(data: ConversationCreate, userId: int):
+async def create_conversation(data: ConversationCreate, current_user: dict = Depends(get_current_user)):
     conversation = await Conversation.create(
-        user_id=userId,
+        user_id=current_user["user_id"],
         title=data.title
     )
     return Result.success({"id": conversation.id, "title": conversation.title})
 
 
 @router.get("/conversations")
-async def get_conversations(userId: int):
-    conversations = await Conversation.filter(user_id=userId).order_by("-updated_at")
+async def get_conversations(current_user: dict = Depends(get_current_user)):
+    conversations = await Conversation.filter(user_id=current_user["user_id"]).order_by("-updated_at")
     result = []
     for conv in conversations:
         result.append({
@@ -54,8 +54,19 @@ async def get_conversations(userId: int):
     return Result.success(result)
 
 
+async def _check_conversation_owner(conversation_id: int, current_user: dict) -> Conversation:
+    """校验会话归属：本人或管理员可访问，否则抛异常。"""
+    conversation = await Conversation.get_or_none(id=conversation_id)
+    if conversation is None:
+        raise CustomException("会话不存在")
+    if current_user["role"] != "管理员" and conversation.user_id != current_user["user_id"]:
+        raise CustomException("无权访问该会话")
+    return conversation
+
+
 @router.get("/messages/{conversation_id}")
-async def get_messages(conversation_id: int):
+async def get_messages(conversation_id: int, current_user: dict = Depends(get_current_user)):
+    await _check_conversation_owner(conversation_id, current_user)
     messages = await Message.filter(conversation_id=conversation_id).order_by("created_at")
     result = []
     for msg in messages:
@@ -69,10 +80,8 @@ async def get_messages(conversation_id: int):
 
 
 @router.post("/send")
-async def send_message(data: MessageRequest, userId: int):
-    conversation = await Conversation.get_or_none(id=data.conversation_id)
-    if not conversation:
-        raise CustomException("会话不存在")
+async def send_message(data: MessageRequest, current_user: dict = Depends(get_current_user)):
+    conversation = await _check_conversation_owner(data.conversation_id, current_user)
 
     await Message.create(
         conversation_id=data.conversation_id,
@@ -85,7 +94,7 @@ async def send_message(data: MessageRequest, userId: int):
 
     async def generate():
         full_response = ""
-        async for chunk in chat_service.process_message_stream(data.message, history_list[:-1]):
+        async for chunk in chat_service.process_message_stream(data.message, history_list[:-1], current_user["user_id"]):
             full_response += chunk
             yield f"data: {json.dumps({'content': chunk})}\n\n"
 
@@ -105,23 +114,43 @@ async def send_message(data: MessageRequest, userId: int):
         generate(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache", # 禁用缓存
-            "Connection": "keep-alive", # 保持连接
-            "X-Accel-Buffering": "no" # 禁用 Nginx 代理缓冲
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
         }
     )
 
 
 @router.delete("/conversation/{conversation_id}")
-async def delete_conversation(conversation_id: int):
+async def delete_conversation(conversation_id: int, current_user: dict = Depends(get_current_user)):
+    await _check_conversation_owner(conversation_id, current_user)
     await Message.filter(conversation_id=conversation_id).delete()
     await Conversation.filter(id=conversation_id).delete()
     return Result.success()
 
 
-@router.post("/rebuild-index")
+@router.post("/rebuild-index", dependencies=[Depends(get_current_admin)])
 async def rebuild_index():
-    """重建 RAG 向量索引"""
+    """全量重建商品向量索引 + 知识库统计。
+    适用于 ChromaDB 损坏、模型升级等场景；重建后已 pending 的 IndexTask 仍可由 /index/run-pending 兜底。"""
     goods_list = await Goods.all().prefetch_related('category')
-    rag_service.build_index(goods_list)
-    return Result.success({"count": len(goods_list)})
+    knowledge_service.sync_all_goods(goods_list)
+    stats = knowledge_service.get_stats()
+    return Result.success(stats)
+
+
+@router.post("/index/run-pending", dependencies=[Depends(get_current_admin)])
+async def run_pending_index_tasks():
+    """兜底重跑 outbox 中 pending/failed 的索引任务（BackgroundTasks 进程崩溃或外部 API 故障后）。"""
+    result = await knowledge_service.run_pending_tasks(limit=100)
+    return Result.success(result)
+
+
+@router.get("/index/stats", dependencies=[Depends(get_current_admin)])
+async def index_stats():
+    """返回 IndexTask 各状态计数，用于诊断 outbox 健康度。"""
+    from models import IndexTask
+    pending = await IndexTask.filter(status='pending').count()
+    failed = await IndexTask.filter(status='failed').count()
+    done = await IndexTask.filter(status='done').count()
+    return Result.success({"pending": pending, "failed": failed, "done": done})

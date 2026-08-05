@@ -9,6 +9,7 @@ class Admin(Model):
     name = fields.CharField(max_length=255, null=True)
     avatar = fields.CharField(max_length=255, null=True)
     role = fields.CharField(max_length=255, null=True)
+    must_change_password = fields.BooleanField(default=True)
 
     class Meta:
         table = 'admin'
@@ -22,6 +23,7 @@ class User(Model):
     name = fields.CharField(max_length=255, null=True)
     avatar = fields.CharField(max_length=255, null=True)
     role = fields.CharField(max_length=255, null=True)
+    must_change_password = fields.BooleanField(default=True)
 
     class Meta:
         table = 'user'
@@ -62,6 +64,7 @@ class Address(Model):
 
 class Orders(Model):
     id = fields.IntField(pk=True, null=False)
+    order_no = fields.CharField(max_length=255, null=True)
     num = fields.IntField(null=True)
     user = fields.ForeignKeyField('models.User', null=True)
     goods = fields.ForeignKeyField('models.Goods', null=True)
@@ -101,6 +104,45 @@ class Message(Model):
 
     class Meta:
         table = 'message'
+
+
+class Favorite(Model):
+    id = fields.IntField(pk=True, null=False)
+    user = fields.ForeignKeyField('models.User', null=True)
+    goods = fields.ForeignKeyField('models.Goods', null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'favorite'
+
+
+class Knowledge(Model):
+    id = fields.IntField(pk=True, null=False)
+    filename = fields.CharField(max_length=255, null=True)
+    original_name = fields.CharField(max_length=255, null=True)
+    file_size = fields.IntField(null=True)
+    chunk_count = fields.IntField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'knowledge'
+
+
+class IndexTask(Model):
+    """向量索引 outbox：MySQL 业务提交后写入，后台任务异步同步到 ChromaDB。
+    ChromaDB 视为可重建的派生索引，索引失败不影响业务事务。"""
+    id = fields.IntField(pk=True, null=False)
+    entity_type = fields.CharField(max_length=32, default='goods')
+    entity_id = fields.IntField()
+    action = fields.CharField(max_length=16)  # upsert | delete
+    status = fields.CharField(max_length=16, default='pending')  # pending | done | failed
+    attempts = fields.IntField(default=0)
+    last_error = fields.TextField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = 'index_task'
 
 
 

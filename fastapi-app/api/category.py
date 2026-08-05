@@ -1,9 +1,10 @@
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import create_model
 from tortoise.contrib.pydantic import pydantic_model_creator
 
+from common.auth import get_current_user, get_current_admin
 from common.result import Result, PageInfo
 from models import Category
 
@@ -22,27 +23,27 @@ CategoryCreatePydantic = create_model(
 )
 
 
-@router.post("/add")
+@router.post("/add", dependencies=[Depends(get_current_admin)])
 async def add(category_pydantic: CategoryCreatePydantic):
     create_data = category_pydantic.model_dump(exclude_unset=True, exclude={'id'})
     await Category.create(**create_data)
     return Result.success()
 
 
-@router.put("/update")
+@router.put("/update", dependencies=[Depends(get_current_admin)])
 async def update(category_pydantic: CategoryCreatePydantic):
     update_data = category_pydantic.model_dump(exclude_unset=True, exclude={'id'})
     await Category.filter(id=category_pydantic.id).update(**update_data)
     return Result.success()
 
 
-@router.delete("/delete/{user_id}")
+@router.delete("/delete/{user_id}", dependencies=[Depends(get_current_admin)])
 async def delete(user_id: int):
     await Category.filter(id=user_id).delete()
     return Result.success()
 
 
-@router.get("/selectPage")
+@router.get("/selectPage", dependencies=[Depends(get_current_user)])
 async def select(name: str = "", pageNum: int = 1, pageSize: int = 5):
     # 同时获取分页数据和总数
     query = Category.filter(name__contains=name)
@@ -61,7 +62,7 @@ async def select(name: str = "", pageNum: int = 1, pageSize: int = 5):
 
 
 # 查询所有
-@router.get("/selectAll")
+@router.get("/selectAll", dependencies=[Depends(get_current_user)])
 async def select_all(name: str = ""):
     category_list = await Category.filter(name__contains=name) # 模糊查询
     return Result.success(category_list)
