@@ -1,13 +1,28 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 加载 fastapi-app/.env（已被 .gitignore 排除）
+load_dotenv(Path(__file__).parent / ".env")
+
+# ---- 数据库 ----
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_NAME = os.getenv("DB_NAME", "cake_store")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+
 TORTOISE_ORM = {
     "connections": {
         "default": {
             "engine": "tortoise.backends.mysql",
             "credentials": {
-                "host": "localhost",
-                "port": 3306,
-                "database": "cake_store",  # 数据库名称
-                "user": "root",
-                "password": "REDACTED_DB_PASSWORD",  # 数据库密码
+                "host": DB_HOST,
+                "port": DB_PORT,
+                "database": DB_NAME,
+                "user": DB_USER,
+                "password": DB_PASSWORD,
                 "minsize": 1,
                 "maxsize": 10,
                 "charset": "utf8mb4",
@@ -21,21 +36,22 @@ TORTOISE_ORM = {
           "default_connection": "default",
       }
     },
-    "use_tz": True,  # 是否使用时区
+    "use_tz": True,
     "timezone": "Asia/Shanghai"
 }
 
-# 智能问答配置
+# ---- 智能问答 / LLM ----
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+
 AI_CONFIG = {
-    "dashscope_api_key": "REDACTED_DASHSCOPE_KEY",  # 通义千问 API Key，需要替换为实际的 key
-    "model": "qwen-turbo",  # 模型选择: qwen-turbo, qwen-plus, qwen-max
-    "embedding_model": "text-embedding-v2",  # Embedding 模型
-    "max_history": 20,  # 最大历史消息数
-    "top_k": 3,  # RAG 检索数量
+    "dashscope_api_key": DASHSCOPE_API_KEY,
+    "model": os.getenv("LLM_MODEL", "qwen-turbo"),
+    "embedding_model": os.getenv("EMBEDDING_MODEL", "text-embedding-v2"),
+    "max_history": int(os.getenv("LLM_MAX_HISTORY", "20")),
+    "top_k": int(os.getenv("RAG_TOP_K", "3")),
 }
 
-# JWT 配置
-JWT_SECRET_KEY = "REDACTED_JWT_SECRET"
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = 24
-
+# ---- JWT ----
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
