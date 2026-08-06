@@ -20,6 +20,7 @@ const router = createRouter({
         { path: 'goods', component: () => import('@/views/manager/Goods.vue')},
         { path: 'address', component: () => import('@/views/manager/Address.vue')},
         { path: 'cake', component: () => import('@/views/manager/Cake.vue')},
+        { path: 'cake/:id', component: () => import('@/views/manager/CakeDetail.vue'), props: true},
         { path: 'orders', component: () => import('@/views/manager/Orders.vue')},
         { path: 'notice', component: () => import('@/views/manager/Notice.vue')},
         { path: 'chat', component: () => import('@/views/manager/Chat.vue')},

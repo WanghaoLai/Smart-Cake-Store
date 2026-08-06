@@ -82,7 +82,7 @@
           </el-col>
         </el-row>
         <el-form-item label="商品描述" prop="description">
-          <el-input type="textarea" :rows="2" v-model="data.form.description" autocomplete="off" placeholder="请输入商品描述" />
+          <el-input type="textarea" :rows="2" v-model="data.form.description" autocomplete="off" placeholder="请输入商品描述（用于卡片列表简短展示）" />
         </el-form-item>
         <el-form-item label="商品图片" prop="img">
           <el-upload :action="uploadUrl" list-type="picture-card" :on-success="handleImgSuccess" :file-list="data.fileList" :limit="1" :headers="uploadHeaders" class="goods-uploader">
@@ -106,6 +106,63 @@
             </el-form-item>
           </el-col>
         </el-row>
+
+        <!-- 详情页扩展字段（可折叠） -->
+        <el-collapse v-model="data.activeCollapse" class="detail-collapse">
+          <el-collapse-item name="detail">
+            <template #title>
+              <div class="collapse-title">
+                <el-icon class="collapse-icon"><Document /></el-icon>
+                <span>详情页信息</span>
+                <span class="collapse-hint">（用于商品详情页展示，可不填）</span>
+              </div>
+            </template>
+            <el-form-item label="详细介绍" prop="detail">
+              <el-input
+                type="textarea"
+                :rows="5"
+                v-model="data.form.detail"
+                placeholder="详情页展示的长文本介绍，支持换行。建议包含：造型 / 口感 / 工艺 / 适用场景"
+              />
+              <div class="field-hint">支持换行分段；详情页会按段落渲染</div>
+            </el-form-item>
+            <el-form-item label="配料表" prop="ingredients">
+              <el-input
+                type="textarea"
+                :rows="2"
+                v-model="data.form.ingredients"
+                placeholder="如：小麦粉、白砂糖、鸡蛋、稀奶油…（用于过敏原提示）"
+              />
+            </el-form-item>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="规格" prop="specs">
+                  <el-input v-model="data.form.specs" autocomplete="off" placeholder="如：6寸 / 8寸 / 10寸（用 / 分隔多个规格）" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="净含量" prop="weight">
+                  <el-input v-model="data.form.weight" autocomplete="off" placeholder="如：6寸 约 500g" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item label="适用人数" prop="serves">
+                  <el-input v-model="data.form.serves" autocomplete="off" placeholder="如：3-5 人份" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="保质期" prop="shelf_life">
+                  <el-input v-model="data.form.shelf_life" autocomplete="off" placeholder="如：冷藏 24 小时内食用" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="产地" prop="origin">
+              <el-input v-model="data.form.origin" autocomplete="off" placeholder="如：上海·中央厨房手工制作" />
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
       </el-form>
       <template #footer>
         <el-button @click="data.formVisible = false" round>取消</el-button>
@@ -119,7 +176,7 @@
 import { reactive, ref, watch } from "vue";
 import request from "@/utils/request";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Search, Plus, Edit, Delete, Refrigerator, Picture } from "@element-plus/icons-vue";
+import { Search, Plus, Edit, Delete, Refrigerator, Picture, Document } from "@element-plus/icons-vue";
 
 const formRef = ref()
 const uploadUrl = import.meta.env.VITE_BASE_URL + '/files/upload?category=goods'
@@ -130,6 +187,7 @@ const data = reactive({
   form: {},
   formVisible: false,
   fileList: [],
+  activeCollapse: [],
   name: null,
   pageNum: 1,
   pageSize: 10,
@@ -271,5 +329,51 @@ watch(() => data.formVisible, (v) => {
   width: 100px;
   height: 100px;
   border-radius: var(--r-md);
+}
+
+/* —— 详情字段折叠面板 —— */
+.detail-collapse {
+  border: 1px solid var(--c-border-light);
+  border-radius: var(--r-md);
+  margin-top: 8px;
+}
+
+.detail-collapse :deep(.el-collapse-item__header) {
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  background: var(--c-bg-soft);
+  font-weight: 600;
+}
+
+.detail-collapse :deep(.el-collapse-item__wrap) {
+  border-radius: 0 0 var(--r-md) var(--r-md);
+}
+
+.detail-collapse :deep(.el-collapse-item__content) {
+  padding: 16px 14px 0;
+}
+
+.collapse-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--c-text-primary);
+}
+
+.collapse-icon {
+  color: var(--c-primary);
+}
+
+.collapse-hint {
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  font-weight: 400;
+}
+
+.field-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--c-text-secondary);
 }
 </style>

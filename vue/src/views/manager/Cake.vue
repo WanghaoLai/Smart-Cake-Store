@@ -41,13 +41,17 @@
 
     <!-- 商品网格 -->
     <div v-if="data.tableData.length" class="goods-grid">
-      <article v-for="item in data.tableData" :key="item.id" class="goods-card">
+      <article v-for="item in data.tableData" :key="item.id" class="goods-card" @click="goDetail(item.id)">
         <div class="goods-img-wrap">
           <img :src="item.img" :alt="item.name" class="goods-img" />
           <div class="goods-overlay">
-            <button class="overlay-btn" @click="toggleFav(item.id)" :class="{ active: data.favoritedIds[item.id] }">
+            <button class="overlay-btn" @click.stop="toggleFav(item.id)" :class="{ active: data.favoritedIds[item.id] }">
               <el-icon><Star v-if="!data.favoritedIds[item.id]" /><StarFilled v-else /></el-icon>
             </button>
+            <div class="overlay-detail-hint">
+              <el-icon><View /></el-icon>
+              <span>查看详情</span>
+            </div>
           </div>
           <div class="goods-badge" v-if="item.categoryName">{{ item.categoryName }}</div>
           <div class="goods-stock" :class="{ 'out': item.num === 0 }">
@@ -69,7 +73,7 @@
               type="primary"
               class="buy-btn"
               :disabled="item.num === 0"
-              @click="reserveInit(item.id)"
+              @click.stop="reserveInit(item.id)"
               round>
               <el-icon style="margin-right: 4px"><ShoppingCart /></el-icon>立即预订
             </el-button>
@@ -133,15 +137,16 @@
 
 <script setup>
 import { reactive, ref, watch, markRaw, onMounted } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import request from "@/utils/request";
 import { ElMessage } from "element-plus";
 import {
   Search, Grid, Cherry, Apple, Watermelon, Orange, Pear, Grape, IceTea,
-  Star, StarFilled, ShoppingCart, ShoppingBag,
+  Star, StarFilled, ShoppingCart, ShoppingBag, View,
 } from "@element-plus/icons-vue";
 
 const route = useRoute()
+const router = useRouter()
 const formRef = ref()
 
 const iconMap = {
@@ -228,6 +233,10 @@ const setCategory = (id) => {
   data.categoryId = id
   data.pageNum = 1
   load()
+}
+
+const goDetail = (id) => {
+  router.push('/manager/cake/' + id)
 }
 
 const reserveInit = (goodsId) => {
@@ -395,6 +404,7 @@ watch(() => route.query.name, (n) => {
   transition: all var(--t-base) var(--ease-out);
   display: flex;
   flex-direction: column;
+  cursor: pointer;
 }
 
 .goods-card:hover {
@@ -426,12 +436,27 @@ watch(() => route.query.name, (n) => {
   opacity: 0;
   display: flex;
   align-items: flex-start;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 10px;
   transition: opacity var(--t-base) var(--ease-out);
 }
 
 .goods-card:hover .goods-overlay { opacity: 1; }
+
+.overlay-detail-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  color: var(--c-primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--r-pill);
+}
+
+.overlay-detail-hint .el-icon { font-size: 14px; }
 
 .overlay-btn {
   width: 36px; height: 36px;
