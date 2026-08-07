@@ -1,4 +1,5 @@
 """知识库管理 API（仅管理员）"""
+import asyncio
 import os
 
 from fastapi import APIRouter, Depends, UploadFile, File
@@ -7,11 +8,9 @@ from common.auth import get_current_admin
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Knowledge
-from services.knowledge_service import KnowledgeService
+from agents.knowledge import knowledge_service
 
 router = APIRouter(prefix="/knowledge", dependencies=[Depends(get_current_admin)])
-
-knowledge_service = KnowledgeService()
 
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx"}
 
@@ -26,7 +25,7 @@ async def upload(file: UploadFile = File(...)):
     if not file_bytes:
         raise CustomException("文件内容为空")
 
-    info = knowledge_service.add_document(file_bytes, file.filename)
+    info = await asyncio.to_thread(knowledge_service.add_document, file_bytes, file.filename)
 
     knowledge = await Knowledge.create(
         filename=info["doc_id"],
@@ -67,13 +66,13 @@ async def delete(doc_id: int):
     if not knowledge:
         raise CustomException("文档不存在")
 
-    knowledge_service.delete_document(knowledge.filename)
+    await asyncio.to_thread(knowledge_service.delete_document, knowledge.filename)
     await knowledge.delete()
     return Result.success()
 
 
 @router.get("/stats")
 async def stats():
-    stats = knowledge_service.get_stats()
+    stats = await asyncio.to_thread(knowledge_service.get_stats)
     doc_count = await Knowledge.all().count()
     return Result.success({"document_count": doc_count, "chunk_count": stats["total_chunks"]})

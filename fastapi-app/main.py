@@ -7,16 +7,17 @@ from api import api_router
 from common.exception_handler import setup_exceptions
 
 from common.result import Result
-from settings import TORTOISE_ORM
+from settings import CORS_ORIGIN_REGEX, CORS_ORIGINS, TORTOISE_ORM
 
 app = FastAPI()
 
-# 跨域配置 CORS
+# 前后端分离部署：生产环境使用显式来源白名单，避免任意站点调用业务 API。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有源
-    allow_methods=["*"],  # 允许所有 HTTP 方法
-    allow_headers=["*"],  # 允许所有请求头
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # 配置路由
@@ -31,5 +32,5 @@ async def root():
     return Result.success()
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", reload=True, port=9090, reload_dirs=["api", "common", "services"])
+    uvicorn.run("main:app", reload=True, port=9090, reload_dirs=["api", "agents", "common"])
 

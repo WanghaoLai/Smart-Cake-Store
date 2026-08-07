@@ -3,13 +3,13 @@
 # 异常检测系统 - 前后端一键启动脚本
 #
 # 使用方法：
-#   1. macOS：在 Finder 中双击“异常检测系统.command”。
-#   2. 终端：在任意目录执行 /path/to/异常检测系统.command。
+#   1. macOS：在 Finder 中双击“一键启动.command”。
+#   2. 终端：在任意目录执行 /path/to/一键启动.command。
 #   3. 停止：在脚本窗口按 Ctrl+C，将同时停止本脚本启动的前后端。
 #
 # 可选环境变量：
-#   BACKEND_PORT=9090 FRONTEND_PORT=5173 ./异常检测系统.command
-#   OPEN_BROWSER=0 ./异常检测系统.command  # 调试时不打开浏览器
+#   BACKEND_PORT=9090 FRONTEND_PORT=5173 ./一键启动.command
+#   OPEN_BROWSER=0 ./一键启动.command  # 调试时不打开浏览器
 
 set -u
 
@@ -23,9 +23,14 @@ BACKEND_START_PORT="${BACKEND_PORT:-9090}"
 FRONTEND_START_PORT="${FRONTEND_PORT:-5173}"
 FRONTEND_REQUESTED_PORT="$FRONTEND_START_PORT"
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
+SHOW_LIVE_LOGS="${SHOW_LIVE_LOGS:-1}"
 BACKEND_PID=""
 FRONTEND_PID=""
-LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anomaly-system.XXXXXX")"
+
+# 每次启动创建独立时间戳目录；维护 logs/latest 软链接指向最新一次。
+LOG_DIR="$SCRIPT_DIR/logs/startup_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$LOG_DIR"
+ln -sfn "$(basename "$LOG_DIR")" "$SCRIPT_DIR/logs/latest"
 
 print_error() {
   printf '\033[31m%s\033[0m\n' "$1" >&2
@@ -86,11 +91,17 @@ stop_process_tree() {
 cleanup() {
   trap - EXIT INT TERM
   printf '\n正在停止前后端服务...\n'
+  # 实时日志的 tail|awk pipeline 子进程互为兄弟（不是父子），
+  # stop_process_tree 抓不到。pkill -P $$ 直接杀当前 shell 所有子进程，
+  # 涵盖 backend/frontend/tail/awk 全部，比维护 LIVE_LOG_PIDS 列表更可靠。
+  pkill -TERM -P $$ 2>/dev/null || true
   stop_process_tree "$FRONTEND_PID"
   stop_process_tree "$BACKEND_PID"
   wait "$FRONTEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
-  printf '服务已停止。本次日志：%s\n' "$LOG_DIR"
+  printf '服务已停止。\n'
+  printf '  本次日志目录：%s\n' "$LOG_DIR"
+  printf '  历史日志：%s/logs/（latest 指向最近一次启动）\n' "$SCRIPT_DIR"
 }
 trap cleanup EXIT INT TERM
 
@@ -178,6 +189,14 @@ wait_for_service "前端" "$FRONTEND_URL/" "$FRONTEND_PID" "$LOG_DIR/frontend.lo
 
 printf '\n所有服务已启动！\n'
 printf '  前端：%s\n  后端：%s\n  日志：%s\n' "$FRONTEND_URL" "$BACKEND_URL" "$LOG_DIR"
+
+# 默认在终端实时打印日志，方便开发观察；CI/无人值守场景可 SHOW_LIVE_LOGS=0 关闭。
+if [ "$SHOW_LIVE_LOGS" = "1" ]; then
+  printf '\n=== 实时日志（按 Ctrl+C 停止所有服务；日志同步写入 %s/{backend,frontend}.log）===\n' "$LOG_DIR"
+  # fflush() 强制 awk 行缓冲，避免管道缓冲导致看不到实时输出
+  tail -n 0 -F "$LOG_DIR/backend.log" 2>/dev/null | awk '{ print "[BE] " $0; fflush() }' &
+  tail -n 0 -F "$LOG_DIR/frontend.log" 2>/dev/null | awk '{ print "[FE] " $0; fflush() }' &
+fi
 
 if [ "$OPEN_BROWSER" != "0" ]; then
   # 启动参数让浏览器进行一次新导航，不复用旧 Vite 页面的 HMR 状态。

@@ -1,34 +1,37 @@
 import json
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from common.auth import get_current_user, get_current_admin
+from agents.agent import AgentUnavailableError
+from agents.factory import create_customer_service_agent
+from common.auth import get_current_user
 from common.exception_handler import CustomException
 from common.result import Result
-from models import Conversation, Message, User, Goods
-from services import LLMService, ChatService
-from services.knowledge_service import knowledge_service
-from settings import AI_CONFIG
+from models import Conversation, Message
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", dependencies=[Depends(get_current_user)])
 
-llm_service = LLMService(
-    api_key=AI_CONFIG["dashscope_api_key"],
-    model=AI_CONFIG["model"]
-)
-chat_service = ChatService(llm_service, knowledge_service)
+customer_service_agent = create_customer_service_agent()
 
 
 class ConversationCreate(BaseModel):
-    title: Optional[str] = "新对话"
+    title: Optional[str] = Field(default="新对话", max_length=255)
 
 
 class MessageRequest(BaseModel):
     conversation_id: int
-    message: str
+    message: str = Field(min_length=1, max_length=10000)
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.post("/conversation")
@@ -93,22 +96,39 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
     history_list = [{"role": msg.role, "content": msg.content} for msg in history]
 
     async def generate():
-        full_response = ""
-        async for chunk in chat_service.process_message_stream(data.message, history_list[:-1], current_user["user_id"]):
-            full_response += chunk
-            yield f"data: {json.dumps({'content': chunk})}\n\n"
+        yield _sse({"type": "status", "status": "thinking", "message": "正在思考并查询相关信息…"})
+        try:
+            full_response = await customer_service_agent.process_message(
+                data.message,
+                history_list[:-1],
+                user_id=current_user["user_id"],
+                conversation_id=data.conversation_id,
+            )
+        except AgentUnavailableError:
+            logger.exception(
+                "agent request failed: conversation_id=%s user_id=%s",
+                data.conversation_id,
+                current_user["user_id"],
+            )
+            full_response = "智能客服暂时不可用，请稍后重试或联系人工客服。"
+            event_type = "error"
+        else:
+            event_type = "message"
 
+        # Persist the complete result before emitting it so a disconnected browser
+        # does not leave a user message without its corresponding assistant result.
         await Message.create(
             conversation_id=data.conversation_id,
             role="assistant",
-            content=full_response
+            content=full_response,
         )
-
         if conversation.title == "新对话":
             title = data.message[:20] + "..." if len(data.message) > 20 else data.message
             await Conversation.filter(id=data.conversation_id).update(title=title)
 
-        yield f"data: {json.dumps({'done': True})}\n\n"
+        for index in range(0, len(full_response), 24):
+            yield _sse({"type": event_type, "content": full_response[index:index + 24]})
+        yield _sse({"type": "done", "done": True, "ok": event_type == "message"})
 
     return StreamingResponse(
         generate(),
@@ -127,30 +147,3 @@ async def delete_conversation(conversation_id: int, current_user: dict = Depends
     await Message.filter(conversation_id=conversation_id).delete()
     await Conversation.filter(id=conversation_id).delete()
     return Result.success()
-
-
-@router.post("/rebuild-index", dependencies=[Depends(get_current_admin)])
-async def rebuild_index():
-    """全量重建商品向量索引 + 知识库统计。
-    适用于 ChromaDB 损坏、模型升级等场景；重建后已 pending 的 IndexTask 仍可由 /index/run-pending 兜底。"""
-    goods_list = await Goods.all().prefetch_related('category')
-    knowledge_service.sync_all_goods(goods_list)
-    stats = knowledge_service.get_stats()
-    return Result.success(stats)
-
-
-@router.post("/index/run-pending", dependencies=[Depends(get_current_admin)])
-async def run_pending_index_tasks():
-    """兜底重跑 outbox 中 pending/failed 的索引任务（BackgroundTasks 进程崩溃或外部 API 故障后）。"""
-    result = await knowledge_service.run_pending_tasks(limit=100)
-    return Result.success(result)
-
-
-@router.get("/index/stats", dependencies=[Depends(get_current_admin)])
-async def index_stats():
-    """返回 IndexTask 各状态计数，用于诊断 outbox 健康度。"""
-    from models import IndexTask
-    pending = await IndexTask.filter(status='pending').count()
-    failed = await IndexTask.filter(status='failed').count()
-    done = await IndexTask.filter(status='done').count()
-    return Result.success({"pending": pending, "failed": failed, "done": done})

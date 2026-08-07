@@ -6,6 +6,25 @@ from dotenv import load_dotenv
 # 加载 fastapi-app/.env（已被 .gitignore 排除）
 load_dotenv(Path(__file__).parent / ".env")
 
+
+def _csv_env(name: str, default: str) -> list[str]:
+    """Parse a comma-separated environment variable and discard empty values."""
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+# ---- 运行环境 / 前后端跨域 ----
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+CORS_ORIGINS = _csv_env(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+# 开发服务器可能自动选择其他端口；生产环境只接受 CORS_ORIGINS 白名单。
+CORS_ORIGIN_REGEX = (
+    r"^https?://(localhost|127\.0\.0\.1):\d+$"
+    if APP_ENV == "development"
+    else None
+)
+
 # ---- 数据库 ----
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
