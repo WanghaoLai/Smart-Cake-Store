@@ -141,7 +141,14 @@ const loadAddress = () => {
 }
 
 const reserveInit = (goodsId) => {
-  data.form = { userId: data.user.id, goodsId, num: 1 }
+  // 默认选中 is_default 的地址；找不到时为 null，由表单 required 校验拦下
+  const defaultAddr = data.addressList.find(a => a.isDefault) || null
+  data.form = {
+    userId: data.user.id,
+    goodsId,
+    num: 1,
+    addressId: defaultAddr ? defaultAddr.id : null,
+  }
   data.formVisible = true
 }
 

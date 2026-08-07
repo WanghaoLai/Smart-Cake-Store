@@ -8,7 +8,7 @@ from common.auth import get_current_admin
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Knowledge
-from agents.knowledge import knowledge_service
+from agents.rag import knowledge_service
 
 router = APIRouter(prefix="/knowledge", dependencies=[Depends(get_current_admin)])
 

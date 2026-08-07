@@ -65,11 +65,49 @@ class Address(Model):
     id = fields.IntField(pk=True, null=False)
     user = fields.ForeignKeyField('models.User', null=True)
     name = fields.CharField(max_length=255, null=True)
-    address = fields.CharField(max_length=255, null=True)
     phone = fields.CharField(max_length=255, null=True)
+    # 结构化地址：省/市/区县 ID + 冗余名称（地区表只读，冗余存储避免每次 3 表 join）
+    province = fields.ForeignKeyField('models.Province', null=True)
+    province_name = fields.CharField(max_length=32, null=True)
+    city = fields.ForeignKeyField('models.City', null=True)
+    city_name = fields.CharField(max_length=64, null=True)
+    town = fields.ForeignKeyField('models.Town', null=True)
+    town_name = fields.CharField(max_length=64, null=True)
+    detail = fields.CharField(max_length=255, null=True)
+    # 历史字段保留向后兼容；新增/更新时由 省+市+区+detail 自动拼接
+    address = fields.CharField(max_length=255, null=True)
+    # 默认地址：每个用户最多 1 条 is_default=True；事务内互斥更新
+    is_default = fields.BooleanField(default=False)
 
     class Meta:
         table = 'address'
+
+
+class Province(Model):
+    id = fields.IntField(pk=True, null=False)
+    name = fields.CharField(max_length=32, null=True)
+    area = fields.CharField(max_length=64, null=True)
+
+    class Meta:
+        table = 'tb_province'
+
+
+class City(Model):
+    id = fields.IntField(pk=True, null=False)
+    name = fields.CharField(max_length=64, null=True)
+    province = fields.ForeignKeyField('models.Province', null=True)
+
+    class Meta:
+        table = 'tb_city'
+
+
+class Town(Model):
+    id = fields.IntField(pk=True, null=False)
+    name = fields.CharField(max_length=64, null=True)
+    city = fields.ForeignKeyField('models.City', null=True)
+
+    class Meta:
+        table = 'tb_town'
 
 class Orders(Model):
     id = fields.IntField(pk=True, null=False)

@@ -9,7 +9,7 @@ from tortoise.transactions import in_transaction
 from common.auth import get_current_user, get_current_admin
 from common.result import Result, PageInfo
 from models import Goods, IndexTask
-from agents.knowledge import index_task_service
+from agents.rag import index_task_service
 
 logger = logging.getLogger(__name__)
 

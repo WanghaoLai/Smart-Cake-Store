@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agents.agent import AgentUnavailableError
-from agents.factory import create_customer_service_agent
+from agents.graph import create_customer_service_agent
 from common.auth import get_current_user
 from common.exception_handler import CustomException
 from common.result import Result
