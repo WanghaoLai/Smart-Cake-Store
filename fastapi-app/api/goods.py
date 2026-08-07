@@ -9,7 +9,7 @@ from tortoise.transactions import in_transaction
 from common.auth import get_current_user, get_current_admin
 from common.result import Result, PageInfo
 from models import Goods, IndexTask
-from services.knowledge_service import knowledge_service
+from agents.knowledge import index_task_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ async def _process_index_task_safe(task_id: int) -> None:
     """BackgroundTasks 入口：吞掉异常防止任务栈污染。
     失败时 IndexTask 表已记录 attempts/last_error，可由 /index/run-pending 兜底。"""
     try:
-        await knowledge_service.process_index_task(task_id)
+        await index_task_service.process(task_id)
     except Exception:
         pass
 

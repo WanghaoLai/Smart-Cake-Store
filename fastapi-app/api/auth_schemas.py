@@ -1,11 +1,23 @@
-"""认证相关 Pydantic 模型"""
+"""认证相关 Pydantic 模型。"""
 from pydantic import BaseModel
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    name: str | None = None
+    avatar: str | None = None
 
 
 class LoginRequest(BaseModel):
     username: str
     password: str
     role: str
+
+
+class PasswordUpdateRequest(BaseModel):
+    password: str
+    newPassword: str
 
 
 class UserInfo(BaseModel):

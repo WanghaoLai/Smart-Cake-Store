@@ -1,118 +1,46 @@
-import importlib
-import pkgutil
+"""Application API router composition.
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict
+Routes are registered explicitly so startup behavior and dependencies remain
+visible during review. Endpoint implementations belong in their own modules.
+"""
 
-from common.auth import hash_password, verify_password, create_access_token, get_current_user
-from common.exception_handler import CustomException
-from common.result import Result
-from models import Admin, User
+from fastapi import APIRouter
 
-
-class Account(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int = None
-    username: str = None
-    password: str = None
-    newPassword: str = None
-    role: str = None
-    name: str = None
-    avatar: str = None
+from .address import router as address_router
+from .admin import router as admin_router
+from .auth import router as auth_router
+from .category import router as category_router
+from .chat import router as chat_router
+from .favorite import router as favorite_router
+from .files import router as files_router
+from .goods import router as goods_router
+from .index import router as index_router
+from .knowledge import router as knowledge_router
+from .notice import router as notice_router
+from .orders import router as orders_router
+from .stats import router as stats_router
+from .user import router as user_router
 
 
 api_router = APIRouter()
 
-
-# 登录
-@api_router.post("/login")
-async def login(account: Account):
-    if account.role == '管理员':
-        user = await Admin.get_or_none(username=account.username)
-    else:
-        user = await User.get_or_none(username=account.username)
-
-    if user is None:
-        raise CustomException("账号不存在，请注册账号")
-
-    is_valid, needs_upgrade = verify_password(account.password, user.password)
-    if not is_valid:
-        raise CustomException("账号或密码错误")
-
-    if needs_upgrade:
-        hashed = hash_password(account.password)
-        if account.role == '管理员':
-            await Admin.filter(id=user.id).update(password=hashed)
-        else:
-            await User.filter(id=user.id).update(password=hashed)
-
-    token = create_access_token({
-        "id": user.id,
-        "username": user.username,
-        "role": account.role,
-    })
-
-    user_data = {
-        "id": user.id,
-        "username": user.username,
-        "name": user.name,
-        "avatar": user.avatar,
-        "role": account.role,
-        "must_change_password": bool(getattr(user, 'must_change_password', False)),
-    }
-    return Result.success({"token": token, "user": user_data})
+for router in (
+    auth_router,
+    address_router,
+    admin_router,
+    category_router,
+    chat_router,
+    favorite_router,
+    files_router,
+    goods_router,
+    index_router,
+    knowledge_router,
+    notice_router,
+    orders_router,
+    stats_router,
+    user_router,
+):
+    api_router.include_router(router)
 
 
-# 注册
-@api_router.post("/register")
-async def register(account: Account):
-    user = await User.get_or_none(username=account.username)
-    if user is not None:
-        raise CustomException("账号重复")
-    if account.name is None:
-        account.name = account.username
-    if account.password is None:
-        account.password = "123"
-    create_data = account.model_dump(exclude_unset=True, exclude={'id'})
-    create_data['password'] = hash_password(create_data['password'])
-    create_data['role'] = '用户'
-    await User.create(**create_data)
-    return Result.success()
-
-
-# 修改密码
-@api_router.put("/updatePassword")
-async def update_password(account: Account, current_user: dict = Depends(get_current_user)):
-    # 账号 ID 与角色一律以 JWT 为准，不信任请求体
-    user_id = current_user["user_id"]
-    role = current_user["role"]
-
-    if role == '管理员':
-        admin = await Admin.get_or_none(id=user_id)
-        if admin is None:
-            raise CustomException("未找到用户")
-        is_valid, _ = verify_password(account.password, admin.password)
-        if not is_valid:
-            raise CustomException("原密码错误")
-        if verify_password(account.newPassword, admin.password)[0]:
-            raise CustomException("新密码不能原密码跟相同")
-        await Admin.filter(id=user_id).update(password=hash_password(account.newPassword), must_change_password=False)
-    else:
-        user = await User.get_or_none(id=user_id)
-        if user is None:
-            raise CustomException("未找到用户")
-        is_valid, _ = verify_password(account.password, user.password)
-        if not is_valid:
-            raise CustomException("原密码错误")
-        if verify_password(account.newPassword, user.password)[0]:
-            raise CustomException("新密码不能原密码跟相同")
-        await User.filter(id=user_id).update(password=hash_password(account.newPassword), must_change_password=False)
-    return Result.success()
-
-
-# 自动导入当前目录下的所有模块
-for _, module_name, _ in pkgutil.iter_modules(__path__, __name__ + "."):
-    module = importlib.import_module(module_name)
-    if hasattr(module, "router"):
-        api_router.include_router(module.router)
+__all__ = ["api_router"]

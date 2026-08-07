@@ -83,6 +83,7 @@
               <span class="dot"></span>
               <span class="dot"></span>
               <span class="dot"></span>
+              <span class="loading-status">{{ data.status }}</span>
             </div>
           </div>
         </div>
@@ -119,6 +120,7 @@ import { Plus, Delete, ChatDotRound, ChatLineRound, MagicStick, Promotion, InfoF
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const messagesContainer = ref(null)
 
@@ -135,10 +137,11 @@ const data = reactive({
   currentConversation: null,
   messages: [],
   inputMessage: '',
-  loading: false
+  loading: false,
+  status: '正在连接智能客服…'
 })
 
-const renderMarkdown = (text) => marked(text || '')
+const renderMarkdown = (text) => DOMPurify.sanitize(marked.parse(text || ''))
 
 const formatTime = (t) => {
   if (!t) return ''
@@ -224,6 +227,7 @@ const sendMessage = async () => {
   scrollToBottom()
 
   data.loading = true
+  data.status = '正在连接智能客服…'
   data.messages.push({ role: 'assistant', content: '' })
 
   try {
@@ -239,37 +243,55 @@ const sendMessage = async () => {
       })
     })
 
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    if (!response.body) throw new Error('浏览器不支持流式响应')
+
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let assistantMessage = ''
+    let buffer = ''
+    let agentFailed = false
+
+    const handleEvent = (eventText) => {
+      const payload = eventText
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n')
+      if (!payload) return
+      const sseData = JSON.parse(payload)
+      if (sseData.type === 'status') {
+        data.status = sseData.message || '正在处理…'
+        return
+      }
+      if (sseData.content) {
+        assistantMessage += sseData.content
+        const lastMsg = data.messages[data.messages.length - 1]
+        if (lastMsg?.role === 'assistant') lastMsg.content = assistantMessage
+        scrollToBottom()
+      }
+      if (sseData.type === 'error' || (sseData.done && sseData.ok === false)) {
+        agentFailed = true
+      }
+    }
 
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
-      const text = decoder.decode(value)
-      const lines = text.split('\n')
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const jsonStr = line.slice(6)
-            if (jsonStr.trim()) {
-              const sseData = JSON.parse(jsonStr)
-              if (sseData.content) {
-                assistantMessage += sseData.content
-                const lastMsg = data.messages[data.messages.length - 1]
-                if (lastMsg && lastMsg.role === 'assistant') {
-                  lastMsg.content = assistantMessage
-                }
-                scrollToBottom()
-              }
-              if (sseData.done) break
-            }
-          } catch (e) { console.error('解析 SSE 数据失败:', e) }
-        }
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+      for (const eventText of events) {
+        try { handleEvent(eventText) }
+        catch (e) { throw new Error(`SSE 数据格式错误: ${e.message}`) }
       }
+      if (done) break
     }
+    if (buffer.trim()) handleEvent(buffer)
+    if (agentFailed) ElMessage.warning('智能客服暂时不可用，请稍后重试')
     await loadConversations()
   } catch (e) {
+    const lastMsg = data.messages[data.messages.length - 1]
+    if (lastMsg?.role === 'assistant' && !lastMsg.content) data.messages.pop()
     ElMessage.error('发送消息失败')
     console.error(e)
   } finally {
@@ -606,8 +628,15 @@ onMounted(() => { loadConversations() })
 
 .message-text.loading {
   display: flex;
+  align-items: center;
   gap: 4px;
   padding: 14px 16px;
+}
+
+.loading-status {
+  margin-left: 8px;
+  color: var(--c-text-secondary);
+  font-size: 12px;
 }
 
 .dot {
