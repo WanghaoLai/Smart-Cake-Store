@@ -18,6 +18,7 @@ from .index import router as index_router
 from .knowledge import router as knowledge_router
 from .notice import router as notice_router
 from .orders import router as orders_router
+from .region import router as region_router
 from .stats import router as stats_router
 from .user import router as user_router
 
@@ -37,6 +38,7 @@ for router in (
     knowledge_router,
     notice_router,
     orders_router,
+    region_router,
     stats_router,
     user_router,
 ):

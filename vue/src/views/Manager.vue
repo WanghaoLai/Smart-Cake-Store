@@ -103,7 +103,7 @@
           <el-sub-menu index="my-stuff" v-if="data.user.role === '用户'">
             <template #title>
               <el-icon><User /></el-icon>
-              <span>我的</span>
+              <span>个人信息</span>
             </template>
             <el-menu-item index="/manager/orders">
               <el-icon><SoldOut /></el-icon>
