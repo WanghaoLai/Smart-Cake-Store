@@ -44,6 +44,15 @@ class Goods(Model):
     name = fields.CharField(max_length=255, null=True)
     price = fields.FloatField(null=True)
     description = fields.CharField(max_length=255, null=True)
+    # 详情页扩展字段：从第一性原理出发，用户购买前需要确认
+    # 配料（过敏原）/ 详细介绍 / 规格 / 保质期 / 净含量 / 产地 / 适用人数
+    detail = fields.TextField(null=True)
+    ingredients = fields.CharField(max_length=500, null=True)
+    specs = fields.CharField(max_length=255, null=True)
+    shelf_life = fields.CharField(max_length=100, null=True)
+    weight = fields.CharField(max_length=100, null=True)
+    origin = fields.CharField(max_length=100, null=True)
+    serves = fields.CharField(max_length=100, null=True)
     img = fields.CharField(max_length=255, null=True)
     num = fields.IntField(null=True)
     unit = fields.CharField(max_length=255, null=True)

@@ -97,3 +97,16 @@ async def select(name: str = "", categoryId: int = 0, pageNum: int = 1, pageSize
     # 封装分页数据
     pageinfo = PageInfo(total=total, list=goods_list)
     return Result.success(pageinfo)
+
+
+@router.get("/detail/{goods_id}")
+async def detail(goods_id: int):
+    """商品详情：返回完整字段（含 detail/ingredients/specs/shelf_life/weight/origin/serves）"""
+    goods = await Goods.filter(id=goods_id).prefetch_related('category').first()
+    if goods is None:
+        return Result.error("商品不存在或已下架")
+    return Result.success({
+        **GoodsPydantic.model_validate(goods).model_dump(),
+        "categoryName": goods.category.name if goods.category else None,
+        "categoryId": goods.category.id if goods.category else None,
+    })

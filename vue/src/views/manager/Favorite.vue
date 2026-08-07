@@ -22,9 +22,15 @@
     </div>
 
     <div v-if="filteredData.length" class="goods-grid">
-      <article v-for="item in filteredData" :key="item.id" class="goods-card">
+      <article v-for="item in filteredData" :key="item.id" class="goods-card" @click="$router.push('/manager/cake/' + item.id)">
         <div class="goods-img-wrap">
           <img :src="item.img" :alt="item.name" class="goods-img" />
+          <div class="goods-overlay">
+            <div class="overlay-detail-hint">
+              <el-icon><View /></el-icon>
+              <span>查看详情</span>
+            </div>
+          </div>
           <div class="goods-badge" v-if="item.categoryName">{{ item.categoryName }}</div>
           <div class="goods-stock" :class="{ out: item.num === 0 }">
             <template v-if="item.num === 0">已售罄</template>
@@ -42,10 +48,10 @@
             </div>
           </div>
           <div class="card-actions">
-            <el-button class="ghost-btn" round size="small" @click="removeFav(item.id)">
+            <el-button class="ghost-btn" round size="small" @click.stop="removeFav(item.id)">
               <el-icon style="margin-right: 4px"><Delete /></el-icon>取消收藏
             </el-button>
-            <el-button type="primary" class="buy-btn" round size="small" :disabled="item.num === 0" @click="reserveInit(item.id)">
+            <el-button type="primary" class="buy-btn" round size="small" :disabled="item.num === 0" @click.stop="reserveInit(item.id)">
               <el-icon style="margin-right: 4px"><ShoppingCart /></el-icon>立即预订
             </el-button>
           </div>
@@ -96,7 +102,7 @@
 import { reactive, ref, computed, onMounted } from "vue";
 import request from "@/utils/request";
 import { ElMessage } from "element-plus";
-import { Search, Star, Delete, ShoppingCart, ShoppingBag } from "@element-plus/icons-vue";
+import { Search, Star, Delete, ShoppingCart, ShoppingBag, View } from "@element-plus/icons-vue";
 
 const formRef = ref()
 const data = reactive({
@@ -239,6 +245,7 @@ onMounted(() => {
   transition: all var(--t-base) var(--ease-out);
   display: flex;
   flex-direction: column;
+  cursor: pointer;
 }
 
 .goods-card:hover {
@@ -255,6 +262,35 @@ onMounted(() => {
 }
 
 .goods-img { width: 100%; height: 100%; object-fit: cover; }
+
+.goods-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.4), transparent 60%);
+  opacity: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10px;
+  transition: opacity var(--t-base) var(--ease-out);
+}
+
+.goods-card:hover .goods-overlay { opacity: 1; }
+
+.overlay-detail-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  color: var(--c-primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--r-pill);
+}
+
+.overlay-detail-hint .el-icon { font-size: 14px; }
 
 .goods-badge {
   position: absolute;
