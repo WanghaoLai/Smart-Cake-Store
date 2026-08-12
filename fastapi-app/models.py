@@ -117,9 +117,31 @@ class Orders(Model):
     goods = fields.ForeignKeyField('models.Goods', null=True)
     address = fields.ForeignKeyField('models.Address', null=True)
     time = fields.CharField(max_length=255, null=True)
+    # 订单状态：待发货（默认）/ 已发货 / 待评价 / 已评价 / 已取消
+    # 用定长短字符串而非独立状态表：状态集合小且稳定，避免多一次 join，前端直接展示
+    status = fields.CharField(max_length=32, default='待发货', null=True)
 
     class Meta:
         table = 'orders'
+
+
+class Review(Model):
+    """商品评价：1 订单 1 评价（unique order_id），公开可见，管理员可回复。
+    images 存 JSON 数组字符串，避免引入图片子表。"""
+    id = fields.IntField(pk=True, null=False)
+    goods = fields.ForeignKeyField('models.Goods', related_name='reviews', null=True)
+    user = fields.ForeignKeyField('models.User', null=True)
+    # 一单一评：order_id 唯一约束防止重复评价
+    order = fields.ForeignKeyField('models.Orders', related_name='reviews', null=True, unique=True)
+    rating = fields.IntField(null=True)  # 1-5 星
+    content = fields.TextField(null=True)
+    images = fields.TextField(null=True)  # JSON 数组字符串，如 ["url1","url2"]
+    reply = fields.TextField(null=True)  # 管理员回复
+    reply_time = fields.CharField(max_length=32, null=True)
+    time = fields.CharField(max_length=32, null=True)
+
+    class Meta:
+        table = 'review'
 
 class Notice(Model):
     id = fields.IntField(pk=True, null=False)

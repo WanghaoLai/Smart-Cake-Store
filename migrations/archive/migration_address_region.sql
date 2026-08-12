@@ -1,7 +1,8 @@
--- Address 表结构化地址迁移脚本
--- 适用：已有 cake_store 数据库，需要为 address 表新增 省/市/区县 字段
+-- [已废弃] Address 表结构化地址迁移脚本
+-- 废弃原因：cake_store.sql 最新 dump 已包含这些字段，新部署无需再执行
+-- 保留在 archive/ 仅作历史参考。migrate.sh 不会扫描 archive/ 子目录。
 --
--- 新增字段：
+-- 历史新增字段：
 --   province_id     省 ID（关联 tb_province.id）
 --   province_name   省名（冗余存储避免 join）
 --   city_id         市 ID
@@ -12,6 +13,9 @@
 -- 原 address 字段保留向后兼容；新增/更新时由 省+市+区+detail 自动拼接
 
 USE `cake_store`;
+
+-- 显式声明客户端字符集：避免 mysql CLI 默认 latin1 导致中文常量双重编码
+SET NAMES utf8mb4;
 
 ALTER TABLE `address`
   ADD COLUMN `province_id` int DEFAULT NULL COMMENT '省 ID' AFTER `phone`,

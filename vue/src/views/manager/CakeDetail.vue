@@ -190,6 +190,63 @@
         </div>
         <div class="ingredients-text">{{ data.goods.ingredients }}</div>
       </section>
+
+      <!-- 商品评价（公开） -->
+      <section class="info-block card reviews-block">
+        <div class="block-head">
+          <h3 class="block-title">
+            <el-icon><ChatLineSquare /></el-icon>商品评价
+            <span class="reviews-count" v-if="data.reviews.length">({{ data.reviews.length }})</span>
+          </h3>
+          <div class="reviews-summary" v-if="data.reviews.length">
+            <el-rate :model-value="avgRating" disabled size="small" />
+            <span class="avg-num">{{ avgRating.toFixed(1) }}</span>
+          </div>
+        </div>
+
+        <!-- 空态 -->
+        <div v-if="!data.reviews.length" class="empty-block reviews-empty">
+          <el-icon :size="40"><ChatLineSquare /></el-icon>
+          <p>暂无评价，期待您的第一份反馈</p>
+        </div>
+
+        <!-- 评价列表 -->
+        <div v-else class="review-list">
+          <div v-for="rv in data.reviews" :key="rv.id" class="review-item">
+            <div class="review-left">
+              <el-avatar :size="40" :src="rv.userAvatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
+            </div>
+            <div class="review-main">
+              <div class="review-head">
+                <span class="review-user">{{ rv.userName || '匿名用户' }}</span>
+                <el-rate :model-value="rv.rating" disabled size="small" />
+                <span class="review-time">{{ rv.time || '' }}</span>
+              </div>
+              <div class="review-content" v-if="rv.content">{{ rv.content }}</div>
+              <div class="review-images" v-if="rv.images && rv.images.length">
+                <el-image
+                  v-for="(img, idx) in rv.images"
+                  :key="idx"
+                  :src="img"
+                  :preview-src-list="rv.images"
+                  :initial-index="idx"
+                  preview-teleported
+                  class="review-img"
+                  fit="cover"
+                />
+              </div>
+              <!-- 商家回复 -->
+              <div class="review-reply" v-if="rv.reply">
+                <div class="reply-tag">
+                  <el-icon><Service /></el-icon>商家回复
+                </div>
+                <div class="reply-text">{{ rv.reply }}</div>
+                <div class="reply-time" v-if="rv.replyTime">{{ rv.replyTime }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </template>
 
     <!-- 占位：未加载到 -->
@@ -254,6 +311,7 @@ import { ElMessage } from "element-plus";
 import {
   ArrowRight, Goods, User, Timer, Star, StarFilled, ShoppingCart, ShoppingBag,
   CircleCheck, Van, Medal, Document, InfoFilled, Warning, Cherry,
+  ChatLineSquare, Service,
 } from "@element-plus/icons-vue";
 
 const route = useRoute()
@@ -270,6 +328,13 @@ const data = reactive({
   formVisible: false,
   form: {},
   addressList: [],
+  reviews: [],  // 公开商品评价
+})
+
+const avgRating = computed(() => {
+  if (!data.reviews.length) return 0
+  const sum = data.reviews.reduce((s, r) => s + (r.rating || 0), 0)
+  return sum / data.reviews.length
 })
 
 const rules = {
@@ -308,6 +373,14 @@ const loadFavoriteStatus = () => {
     if (res.code === '200') {
       const list = res.data || []
       data.favorited = list.some(g => g.id === Number(route.params.id))
+    }
+  })
+}
+
+const loadReviews = () => {
+  request.get('/reviews/goods/' + route.params.id).then(res => {
+    if (res.code === '200') {
+      data.reviews = res.data || []
     }
   })
 }
@@ -358,6 +431,7 @@ onMounted(() => {
   loadDetail()
   loadFavoriteStatus()
   loadAddress()
+  loadReviews()
 })
 
 watch(() => route.params.id, (newId) => {
@@ -367,6 +441,7 @@ watch(() => route.params.id, (newId) => {
     data.specList = []
     loadDetail()
     loadFavoriteStatus()
+    loadReviews()
   }
 })
 </script>
@@ -853,5 +928,126 @@ watch(() => route.params.id, (newId) => {
   margin-top: 6px;
   font-size: 12px;
   color: var(--c-text-secondary);
+}
+
+/* —— 商品评价 —— */
+.reviews-block { padding: 20px 24px; }
+
+.reviews-count {
+  margin-left: 4px;
+  color: var(--c-text-secondary);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.reviews-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.reviews-summary .avg-num {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-warning);
+  font-feature-settings: "tnum";
+}
+
+.reviews-empty {
+  padding: 36px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-placeholder);
+}
+.reviews-empty .el-icon { color: var(--c-text-placeholder); }
+.reviews-empty p { margin: 0; font-size: 13px; }
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.review-item {
+  display: flex;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px dashed var(--c-border-light);
+}
+.review-item:last-child { border-bottom: none; padding-bottom: 0; }
+.review-item:first-child { padding-top: 0; }
+
+.review-left { flex-shrink: 0; }
+
+.review-main { flex: 1; min-width: 0; }
+
+.review-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.review-user {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-primary);
+}
+.review-time {
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  margin-left: auto;
+}
+
+.review-content {
+  font-size: 14px;
+  color: var(--c-text-regular);
+  line-height: 1.7;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.review-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.review-img {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--c-bg-soft);
+}
+
+.review-reply {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: var(--c-bg-soft);
+  border-left: 3px solid var(--c-primary);
+  border-radius: 6px;
+}
+.reply-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-primary);
+}
+.reply-text {
+  font-size: 13px;
+  color: var(--c-text-regular);
+  line-height: 1.6;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reply-time {
+  font-size: 11px;
+  color: var(--c-text-placeholder);
+  margin-top: 4px;
 }
 </style>

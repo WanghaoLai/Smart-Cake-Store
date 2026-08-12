@@ -1,8 +1,8 @@
--- 商品详情页字段迁移脚本
--- 适用：已有 cake_store 数据库，需要为 goods 表新增详情页字段
--- 用法：在 cake_store 库下执行本脚本
+-- [已废弃] 商品详情页字段迁移脚本
+-- 废弃原因：cake_store.sql 最新 dump 已包含这些字段，新部署无需再执行
+-- 保留在 archive/ 仅作历史参考。migrate.sh 不会扫描 archive/ 子目录。
 --
--- 新增字段：
+-- 历史新增字段：
 --   detail       详情页详细介绍（长文本）
 --   ingredients  配料表（过敏原提示）
 --   specs        规格（如 6寸/8寸/10寸）
@@ -12,6 +12,9 @@
 --   serves       适用人数
 
 USE `cake_store`;
+
+-- 显式声明客户端字符集：避免 mysql CLI 默认 latin1 导致中文常量双重编码
+SET NAMES utf8mb4;
 
 ALTER TABLE `goods`
   ADD COLUMN `detail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '详情页详细介绍' AFTER `description`,

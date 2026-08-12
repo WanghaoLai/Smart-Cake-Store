@@ -19,7 +19,7 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
             f"- 总价：¥{order.goods.price * order.num if order.goods else 0}\n"
             f"- 收货地址：{order.address.address if order.address else '未知'}\n"
             f"- 下单时间：{order.time}\n"
-            "- 状态：待发货"
+            f"- 状态：{order.status or '待发货'}"
         )
 
     orders = await Orders.filter(user_id=user_id).prefetch_related("goods").order_by("-id").limit(10)
@@ -29,7 +29,8 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
     for order in orders:
         goods_name = order.goods.name if order.goods else "未知"
         total = order.goods.price * order.num if order.goods else 0
-        lines.append(f"- 订单号 {order.order_no or 'N/A'}：{goods_name} x{order.num}，¥{total}，{order.time}")
+        status = order.status or "待发货"
+        lines.append(f"- 订单号 {order.order_no or 'N/A'}：{goods_name} x{order.num}，¥{total}，{order.time}，{status}")
     return "\n".join(lines)
 
 

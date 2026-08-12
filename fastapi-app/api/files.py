@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from starlette.responses import FileResponse
 
-from common.auth import get_current_admin
+from common.auth import get_current_admin, get_current_user
 from common.exception_handler import CustomException
 from common.result import Result
 
@@ -17,9 +17,11 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent / "files"
 # 按业务类型分子目录存储，便于视图与维护
 #   files/avatar/  头像
 #   files/goods/   商品图
+#   files/review/  评价图（用户上传）
 CATEGORY_DIRS = {
     "avatar": "avatar",
     "goods": "goods",
+    "review": "review",
 }
 
 # 头像/商品图等仅允许图片，降低存储被滥用风险
@@ -53,6 +55,18 @@ async def upload_file(
 ):
     rel_path = _save(file, category)
     # 用请求的 base_url 拼绝对地址，适配任意 host/端口，前端可直接作 img src
+    url = f"{request.base_url}files/download/{rel_path}"
+    return Result.success(url)
+
+
+@router.post("/upload_review", dependencies=[Depends(get_current_user)])
+async def upload_review_file(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """用户上传评价图。任何登录用户均可调用，但仅限 review 子目录、仅限图片。
+    不接受外部 category 参数，避免被滥用写入 avatar/goods。"""
+    rel_path = _save(file, "review")
     url = f"{request.base_url}files/download/{rel_path}"
     return Result.success(url)
 
