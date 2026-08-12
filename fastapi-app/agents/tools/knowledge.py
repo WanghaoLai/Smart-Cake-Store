@@ -7,7 +7,7 @@ from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from agents.context import AgentContext
+from agents.agent import AgentContext
 
 
 logger = logging.getLogger(__name__)

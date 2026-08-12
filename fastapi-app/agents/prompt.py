@@ -1,3 +1,5 @@
+"""System-prompt component for the application Agent."""
+
 from agents.config import AgentProfile
 
 

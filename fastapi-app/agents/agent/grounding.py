@@ -1,10 +1,11 @@
-"""Deterministic evidence collection before the model is allowed to answer."""
+"""Deterministic application evidence collected before model execution."""
 
 import asyncio
 import logging
 from dataclasses import dataclass
 
-from agents.tools import business_repository
+from agents.tools.order import get_order_status
+from agents.tools.product import get_product_facts
 
 
 logger = logging.getLogger(__name__)
@@ -47,25 +48,18 @@ class GroundingService:
         ]
         context_query = "\n".join([*recent_user_messages, message])[-1200:]
         normalized_context = context_query.lower()
-        jobs: list[tuple[str, object]] = []
-
-        # Except for pure greetings, retrieve uploaded policy/domain knowledge for
-        # every request. Relying on the model to choose retrieval is not reliable.
-        jobs.append((
+        jobs: list[tuple[str, object]] = [(
             "ChromaDB知识库",
             asyncio.to_thread(
                 self.knowledge_service.search_documents,
                 context_query,
                 self.top_k,
             ),
-        ))
+        )]
         if any(term in normalized_context for term in PRODUCT_TERMS):
-            jobs.append(("MySQL实时商品", business_repository.get_product_facts(context_query)))
+            jobs.append(("MySQL实时商品", get_product_facts(context_query)))
         if user_id is not None and any(term in normalized_context for term in ORDER_TERMS):
-            jobs.append(("MySQL当前用户订单", business_repository.get_order_status(user_id=user_id)))
-
-        if not jobs:
-            return []
+            jobs.append(("MySQL当前用户订单", get_order_status(user_id=user_id)))
 
         values = await asyncio.gather(*(job for _, job in jobs), return_exceptions=True)
         evidence: list[GroundingEvidence] = []
@@ -102,3 +96,6 @@ def format_grounding_message(evidence: list[GroundingEvidence]) -> str:
     for item in evidence:
         sections.append(f"\n【{item.source}】\n{item.content}")
     return "".join(sections)
+
+
+__all__ = ["GroundingEvidence", "GroundingService", "format_grounding_message"]
