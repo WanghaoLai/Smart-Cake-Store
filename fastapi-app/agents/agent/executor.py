@@ -1,24 +1,31 @@
-"""Public application facade for the customer-service agent.
-
-The class in this module is intentionally independent of a concrete graph
-implementation.  Today it executes LangChain's compiled graph; a native
-LangGraph graph can replace it later without changing the HTTP layer.
-"""
+"""Stable application facade over the LangChain Agent runtime."""
 
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from agents.context import AgentContext
-from agents.memory.checkpointer import ConversationMemory
-from agents.rag.retriever import format_grounding_message
 from agents.config import AgentProfile
-from agents.tools import business_repository
+from agents.tools.product import build_verified_product_answer, validate_product_answer
+
+from .harness import AgentComponents, AgentContext
+from .grounding import format_grounding_message
 
 
 logger = logging.getLogger(__name__)
+
+
+class AgentRuntime(Protocol):
+    """Minimal LangChain runtime surface required by the application layer."""
+
+    async def ainvoke(
+        self,
+        input_data: dict,
+        config: dict | None = None,
+        *,
+        context: AgentContext | None = None,
+    ) -> dict: ...
 
 
 class AgentUnavailableError(RuntimeError):
@@ -43,54 +50,60 @@ def _truncate(value: Any, limit: int = 40) -> str:
 
 
 def _summarize_tool_chain(messages: list[BaseMessage]) -> list[dict]:
-    """Walk LangGraph output messages and pair each AIMessage.tool_calls with
-    its ToolMessage result. Returns a list of dicts in execution order:
-
-        {"tool": str, "args": {k: truncated_str}, "ok": bool|None, "result_chars": int|None}
-
-    Used for post-hoc debugging and tool-selection audits. Args are truncated
-    so user message fragments don't land in the log verbatim.
-    """
+    """Pair model tool calls with results for bounded operational logging."""
     chain: list[dict] = []
-    pending: dict[str, dict] = {}  # tool_call_id → entry awaiting its result
-    for msg in messages:
-        if isinstance(msg, AIMessage):
-            for call in getattr(msg, "tool_calls", None) or []:
+    pending: dict[str, dict] = {}
+    for message in messages:
+        if isinstance(message, AIMessage):
+            for call in getattr(message, "tool_calls", None) or []:
                 entry = {
                     "tool": call.get("name", "?"),
-                    "args": {k: _truncate(v) for k, v in (call.get("args") or {}).items()},
+                    "args": {key: _truncate(value) for key, value in (call.get("args") or {}).items()},
                     "ok": None,
                     "result_chars": None,
                 }
                 chain.append(entry)
-                call_id = call.get("id")
-                if call_id:
-                    pending[call_id] = entry
-        elif isinstance(msg, ToolMessage):
-            entry = pending.pop(msg.tool_call_id, None)
+                if call.get("id"):
+                    pending[call["id"]] = entry
+        elif isinstance(message, ToolMessage):
+            entry = pending.pop(message.tool_call_id, None)
             if entry is None:
                 continue
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            entry["ok"] = getattr(msg, "status", "") != "error"
+            content = message.content if isinstance(message.content, str) else str(message.content)
+            entry["ok"] = getattr(message, "status", "") != "error"
             entry["result_chars"] = len(content)
     return chain
 
 
-class LangChainAgentExecutor:
+class CustomerServiceAgent:
+    """Application-level Agent used by HTTP endpoints.
+
+    LangChain owns the model/tool loop. This facade owns application concerns:
+    persisted history adaptation, trusted context, deterministic grounding,
+    error isolation, observability, and final-answer validation.
+    """
+
+    framework = "langchain"
+
     def __init__(
         self,
         profile: AgentProfile,
-        graph: Any,
-        tools: list,
+        runtime: AgentRuntime,
+        components: AgentComponents,
         configured: bool = True,
-        grounding_service: Any | None = None,
     ):
+        configured_tools = [tool.name for tool in components.harness.tools]
+        if configured_tools != profile.tools:
+            raise ValueError("Agent 组件工具顺序必须与配置白名单一致")
         self.profile = profile
-        self.graph = graph
-        self.tools = tools
+        self.runtime = runtime
+        self.components = components
         self.configured = configured
-        self.memory = ConversationMemory(profile.max_history)
-        self.grounding_service = grounding_service
+
+    @property
+    def tools(self) -> list:
+        """Compatibility view for integrations inspecting enabled tools."""
+        return list(self.components.harness.tools)
 
     async def process_message(
         self,
@@ -102,15 +115,13 @@ class LangChainAgentExecutor:
         if not self.configured:
             raise AgentUnavailableError("智能客服尚未配置模型凭据")
 
-        messages = self.memory.build(history, user_message)
+        harness = self.components.harness
+        messages = harness.memory.build(history, user_message)
         grounding_sources: list[str] = []
-        if self.grounding_service is not None:
-            evidence = await self.grounding_service.collect(user_message, user_id, history)
-            if evidence:
-                grounding_sources = [item.source for item in evidence]
-                # Keep retrieved content at user-message privilege rather than
-                # promoting untrusted documents into the system prompt.
-                messages.insert(-1, HumanMessage(content=format_grounding_message(evidence)))
+        evidence = await harness.grounding.collect(user_message, user_id, history)
+        if evidence:
+            grounding_sources = [item.source for item in evidence]
+            messages.insert(-1, HumanMessage(content=format_grounding_message(evidence)))
         context = AgentContext(
             user_id=user_id,
             conversation_id=conversation_id,
@@ -126,21 +137,20 @@ class LangChainAgentExecutor:
             "recursion_limit": max(10, self.profile.max_model_calls * 3),
         }
         try:
-            result = await self.graph.ainvoke(
+            result = await self.runtime.ainvoke(
                 {"messages": messages},
                 config=config,
                 context=context,
             )
         except Exception as exc:
             logger.warning(
-                "agent graph_failed conversation_id=%s user_id=%s grounding=%s error=%s",
+                "agent runtime_failed conversation_id=%s user_id=%s grounding=%s error=%s",
                 conversation_id, user_id, grounding_sources or "none", exc,
             )
             raise AgentUnavailableError("智能客服执行失败") from exc
 
         output_messages = result.get("messages", [])
         tool_chain = _summarize_tool_chain(output_messages)
-
         final_message = output_messages[-1] if output_messages else None
         if not isinstance(final_message, AIMessage):
             logger.warning(
@@ -157,8 +167,6 @@ class LangChainAgentExecutor:
             )
             raise AgentUnavailableError("智能客服返回了空回答")
 
-        # Single INFO line per request — easy to grep & aggregate. The chain
-        # detail goes to DEBUG to keep prod logs at one line per request.
         chain_names = " -> ".join(item["tool"] for item in tool_chain) or "none"
         logger.info(
             "agent tool_chain conversation_id=%s user_id=%s grounding=%s chain_len=%d chain=%s answer_chars=%d",
@@ -166,20 +174,16 @@ class LangChainAgentExecutor:
             len(tool_chain), chain_names, len(answer),
         )
         if tool_chain:
-            logger.debug(
-                "agent tool_chain_detail conversation_id=%s detail=%s",
-                conversation_id,
-                tool_chain,
-            )
+            logger.debug("agent tool_chain_detail conversation_id=%s detail=%s", conversation_id, tool_chain)
 
         if "MySQL实时商品" in grounding_sources:
             try:
-                if not await business_repository.validate_product_answer(answer):
+                if not await validate_product_answer(answer):
                     logger.info(
                         "agent answer_rebuilt conversation_id=%s user_id=%s reason=mysql_validation_failed",
                         conversation_id, user_id,
                     )
-                    answer = await business_repository.build_verified_product_answer(
+                    answer = await build_verified_product_answer(
                         "\n".join([
                             *[
                                 str(item.get("content", ""))
@@ -204,23 +208,13 @@ class LangChainAgentExecutor:
         user_id: int | None = None,
         conversation_id: int | None = None,
     ) -> AsyncIterator[str]:
-        # Tool calls and tool results are deliberately completed server-side before
-        # output. This prevents internal calls from leaking through the public SSE.
         answer = await self.process_message(user_message, history, user_id, conversation_id)
         for index in range(0, len(answer), 24):
             yield answer[index:index + 24]
 
 
-# Compatibility for integrations that imported the former ``agents.agent``
-# package.  These aliases contain no implementation; new code must use the
-# responsibility-based modules above.
-import sys as _sys
-from agents.rag import retriever as grounding
-
-executor = _sys.modules[__name__]
-context = _sys.modules[AgentContext.__module__]
-_sys.modules[f"{__name__}.executor"] = executor
-_sys.modules[f"{__name__}.context"] = context
-_sys.modules[f"{__name__}.grounding"] = grounding
-
-__all__ = ["AgentUnavailableError", "LangChainAgentExecutor"]
+__all__ = [
+    "AgentRuntime",
+    "AgentUnavailableError",
+    "CustomerServiceAgent",
+]

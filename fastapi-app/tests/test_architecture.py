@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 
 from agents.factory import create_customer_service_agent
-from agents.knowledge.service import CHROMA_PATH
+from agents.rag.vector_store import CHROMA_PATH
 from main import app
 from starlette.middleware.cors import CORSMiddleware
 
@@ -32,7 +32,38 @@ class ArchitectureTests(unittest.TestCase):
     def test_agent_tool_order_matches_profile_whitelist(self):
         agent = create_customer_service_agent()
         self.assertEqual([tool.name for tool in agent.tools], agent.profile.tools)
-        self.assertEqual(type(agent.graph).__name__, "CompiledStateGraph")
+        self.assertEqual(agent.framework, "langchain")
+        self.assertTrue(callable(agent.runtime.ainvoke))
+
+    def test_application_agent_exposes_model_and_harness_components(self):
+        agent = create_customer_service_agent()
+        self.assertIsNotNone(agent.components.model)
+        self.assertEqual(agent.components.harness.tools, tuple(agent.tools))
+        self.assertTrue(agent.components.harness.system_prompt)
+        self.assertIsNotNone(agent.components.harness.memory)
+        self.assertIsNotNone(agent.components.harness.grounding)
+        self.assertEqual(len(agent.components.harness.middleware), 3)
+
+    def test_agents_do_not_directly_depend_on_langgraph(self):
+        self.assertFalse((BACKEND_DIR / "agents" / "graph").exists())
+        source_files = (BACKEND_DIR / "agents").rglob("*.py")
+        direct_imports = [
+            str(path.relative_to(BACKEND_DIR))
+            for path in source_files
+            if "langgraph" in path.read_text(encoding="utf-8").lower()
+        ]
+        self.assertEqual(direct_imports, [])
+        requirements = (BACKEND_DIR / "requirements.txt").read_text(encoding="utf-8").lower()
+        self.assertNotIn("langgraph", requirements)
+
+    def test_agents_tree_contains_no_compatibility_only_packages(self):
+        obsolete = {"graph", "knowledge", "llm", "memory", "prompts", "security"}
+        existing = {
+            path.name
+            for path in (BACKEND_DIR / "agents").iterdir()
+            if path.is_dir() and path.name != "__pycache__"
+        }
+        self.assertFalse(existing & obsolete)
 
     def test_system_prompt_documents_every_whitelisted_tool(self):
         """决策树是模型选工具的唯一显式引导：白名单里的每个工具名都必须

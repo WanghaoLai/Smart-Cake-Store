@@ -1,5 +1,15 @@
-"""Extensible customer-service Agent subsystem."""
+"""Extensible LangChain application-Agent subsystem."""
 
-from .agent import AgentUnavailableError, LangChainAgentExecutor
+from .agent import (
+    AgentComponents,
+    AgentHarness,
+    AgentUnavailableError,
+    CustomerServiceAgent,
+)
 
-__all__ = ["AgentUnavailableError", "LangChainAgentExecutor"]
+__all__ = [
+    "AgentComponents",
+    "AgentHarness",
+    "AgentUnavailableError",
+    "CustomerServiceAgent",
+]

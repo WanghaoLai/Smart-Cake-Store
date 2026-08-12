@@ -5,7 +5,7 @@ from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agents.agent.context import AgentContext
+from agents.agent import AgentContext
 from agents.tools import select_tools
 from agents.tools.business import business_tools
 
@@ -22,7 +22,7 @@ def runtime(message: str) -> ToolRuntime[AgentContext]:
 
 
 class LangChainToolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_langchain_graph_executes_native_tool_call_loop(self):
+    async def test_langchain_agent_executes_native_tool_call_loop(self):
         class ToolCallingModel(FakeMessagesListChatModel):
             def bind_tools(self, tools, **kwargs):
                 return self
@@ -39,8 +39,8 @@ class LangChainToolTests(unittest.IsolatedAsyncioTestCase):
             ),
             AIMessage(content="工具调用完成"),
         ])
-        graph = create_agent(model, tools=[echo], context_schema=AgentContext)
-        result = await graph.ainvoke(
+        runtime = create_agent(model, tools=[echo], context_schema=AgentContext)
+        result = await runtime.ainvoke(
             {"messages": [{"role": "user", "content": "test"}]},
             context=AgentContext(user_id=7, conversation_id=11, user_message="test"),
         )

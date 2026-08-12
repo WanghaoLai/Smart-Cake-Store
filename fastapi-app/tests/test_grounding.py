@@ -18,7 +18,7 @@ class GroundingServiceTests(unittest.IsolatedAsyncioTestCase):
         knowledge = FakeKnowledgeService()
         service = GroundingService(knowledge, top_k=2)
         with patch(
-            "agents.agent.grounding.business_repository.get_product_facts",
+            "agents.agent.grounding.get_product_facts",
             new=AsyncMock(return_value="草莓蛋糕｜价格 ¥88｜库存 3个"),
         ) as product_facts:
             evidence = await service.collect("草莓蛋糕还有货吗", user_id=7)
@@ -30,7 +30,7 @@ class GroundingServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_order_question_is_scoped_to_authenticated_user(self):
         service = GroundingService(FakeKnowledgeService())
         with patch(
-            "agents.agent.grounding.business_repository.get_order_status",
+            "agents.agent.grounding.get_order_status",
             new=AsyncMock(return_value="订单 1001：待发货"),
         ) as order_status:
             evidence = await service.collect("我的订单状态", user_id=23)
@@ -52,7 +52,7 @@ class GroundingServiceTests(unittest.IsolatedAsyncioTestCase):
             {"role": "assistant", "content": "请问送给谁？"},
         ]
         with patch(
-            "agents.agent.grounding.business_repository.get_product_facts",
+            "agents.agent.grounding.get_product_facts",
             new=AsyncMock(return_value="福寿安康祝寿蛋糕｜价格 ¥108"),
         ) as product_facts:
             evidence = await service.collect("送长辈", user_id=7, history=history)
