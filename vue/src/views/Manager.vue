@@ -86,15 +86,22 @@
           <!-- 用户：蛋糕商城 -->
           <el-sub-menu index="cake-shop" v-if="data.user.role === '用户'">
             <template #title>
-              <el-icon><Cherry /></el-icon>
+              <el-icon>
+                <Cherry/>
+              </el-icon>
               <span>蛋糕商城</span>
             </template>
             <el-menu-item index="/manager/cake">
-              <el-icon><Grid /></el-icon>
+              <el-icon>
+                <Grid/>
+              </el-icon>
               <template #title>全部商品</template>
             </el-menu-item>
-            <el-menu-item v-for="c in data.categoryList" :key="c.id" :index="`/manager/cake?categoryName=${encodeURIComponent(c.name)}`">
-              <el-icon><component :is="categoryIcon(c.name)" /></el-icon>
+            <el-menu-item v-for="c in data.categoryList" :key="c.id"
+                          :index="`/manager/cake?categoryName=${encodeURIComponent(c.name)}`">
+              <el-icon>
+                <component :is="categoryIcon(c.name)"/>
+              </el-icon>
               <template #title>{{ c.name }}</template>
             </el-menu-item>
           </el-sub-menu>
@@ -156,6 +163,10 @@
             <el-icon><SoldOut /></el-icon>
             <template #title>订单管理</template>
           </el-menu-item>
+          <el-menu-item index="/manager/reviews" v-if="data.user.role === '管理员'">
+            <el-icon><ChatLineSquare /></el-icon>
+            <template #title>评价管理</template>
+          </el-menu-item>
           <el-menu-item index="/manager/notice" v-if="data.user.role === '管理员'">
             <el-icon><Monitor /></el-icon>
             <template #title>公告管理</template>
@@ -203,8 +214,8 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Fold, Expand, Search, HomeFilled, ChatDotRound, CaretBottom, User, Lock,
   SwitchButton, Cherry, Grid, Coin, Refrigerator, Avatar, Position, SoldOut,
-  Location, Monitor, Document, Star,
-  Apple, Watermelon, Orange, Pear, Grape, IceTea,
+  Location, Monitor, Document, Star, ChatLineSquare,
+  Sunset, Present, GobletSquare, MagicStick, Watch, Medal, Trophy,
 } from "@element-plus/icons-vue";
 import request from "@/utils/request";
 
@@ -227,14 +238,16 @@ onMounted(() => {
 })
 
 // 分类图标映射
+// 分类图标映射：从分类语义出发，统一走"概念化"风格而非水果
+// 与系统简约时尚风一致：线条极简、象征性强
 const iconMap = {
-  '情侣空间': markRaw(Cherry),
-  '卡通乐趣': markRaw(Apple),
-  '朋友同事': markRaw(Watermelon),
-  '女神专属': markRaw(Orange),
-  '男生定制': markRaw(Pear),
-  '父母长辈': markRaw(Grape),
-  '二层三层': markRaw(IceTea),
+  '情侣': markRaw(Sunset),        // 日落黄昏的浪漫
+  '童趣': markRaw(Present),       // 生日礼物
+  '聚会': markRaw(GobletSquare),  // 举杯庆祝
+  '女神': markRaw(MagicStick),    // 仙气梦幻
+  '潮男': markRaw(Watch),         // 极简配饰
+  '长辈': markRaw(Medal),         // 荣誉寿礼
+  '宴席': markRaw(Trophy),        // 典礼大场面
 }
 const categoryIcon = (name) => iconMap[name] || Grid
 

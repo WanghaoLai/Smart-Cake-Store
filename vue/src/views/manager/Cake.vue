@@ -141,7 +141,7 @@ import { useRoute, useRouter } from "vue-router";
 import request from "@/utils/request";
 import { ElMessage } from "element-plus";
 import {
-  Search, Grid, Cherry, Apple, Watermelon, Orange, Pear, Grape, IceTea,
+  Search, Grid, Cherry, Sunset, Present, GobletSquare, MagicStick, Watch, Medal, Trophy,
   Star, StarFilled, ShoppingCart, ShoppingBag, View,
 } from "@element-plus/icons-vue";
 
@@ -149,14 +149,15 @@ const route = useRoute()
 const router = useRouter()
 const formRef = ref()
 
+// 分类图标：概念化设计（与 Manager.vue 一致），不走水果路线以契合简约时尚风格
 const iconMap = {
-  '情侣空间': markRaw(Cherry),
-  '卡通乐趣': markRaw(Apple),
-  '朋友同事': markRaw(Watermelon),
-  '女神专属': markRaw(Orange),
-  '男生定制': markRaw(Pear),
-  '父母长辈': markRaw(Grape),
-  '二层三层': markRaw(IceTea),
+  '情侣': markRaw(Sunset),
+  '童趣': markRaw(Present),
+  '聚会': markRaw(GobletSquare),
+  '女神': markRaw(MagicStick),
+  '潮男': markRaw(Watch),
+  '长辈': markRaw(Medal),
+  '宴席': markRaw(Trophy),
 }
 const categoryIcon = (name) => iconMap[name] || Grid
 

@@ -14,6 +14,28 @@ from models import Orders, Goods
 
 router = APIRouter(prefix="/orders", dependencies=[Depends(get_current_user)])
 
+# 订单状态常量：集中定义，避免魔法字符串散落各文件
+ORDER_PENDING = "待发货"
+ORDER_SHIPPED = "已发货"
+# "已签收"语义上等同于"待评价"（签收后等待评价）；为兼容历史数据保留常量，
+# 但新流转不再使用，迁移脚本会把历史 已签收 回填为 待评价
+ORDER_RECEIVED = "已签收"
+ORDER_PENDING_REVIEW = "待评价"
+ORDER_REVIEWED = "已评价"
+ORDER_CANCELLED = "已取消"
+
+# 状态机：(角色, 当前状态, 目标状态) -> 允许
+# 取消订单时由 update_status 内部统一恢复库存，调用方无需关心
+ALLOWED_TRANSITIONS = {
+    ("管理员", ORDER_PENDING, ORDER_SHIPPED),
+    ("管理员", ORDER_PENDING, ORDER_CANCELLED),
+    # 用户确认签收 = 进入待评价；评价提交完成后由 /reviews/add 推进到 已评价
+    ("用户", ORDER_SHIPPED, ORDER_PENDING_REVIEW),
+    ("用户", ORDER_RECEIVED, ORDER_PENDING_REVIEW),
+    ("用户", ORDER_PENDING, ORDER_CANCELLED),
+    ("用户", ORDER_SHIPPED, ORDER_CANCELLED),
+}
+
 # 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
 OrdersPydantic = pydantic_model_creator(Orders)
 # 自动生成所有字段为 Optional 的更新模型
@@ -56,6 +78,7 @@ async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depend
             num=orders_pydantic.num,
             time=time_str,
             order_no=order_no,
+            status=ORDER_PENDING,
         )
         goods.num -= orders_pydantic.num
         await goods.save(update_fields=['num'])
@@ -73,7 +96,8 @@ async def delete(id: int, current_user: dict = Depends(get_current_user)):
         if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
             raise CustomException("无权操作该订单")
 
-        if order.goods_id:
+        # 已取消的订单在状态变更时已恢复过库存，这里避免二次回补
+        if order.status != ORDER_CANCELLED and order.goods_id:
             goods = await Goods.filter(id=order.goods_id).select_for_update().first()
             if goods:
                 goods.num += order.num
@@ -84,8 +108,41 @@ async def delete(id: int, current_user: dict = Depends(get_current_user)):
     return Result.success()
 
 
+@router.put("/update_status/{id}")
+async def update_status(id: int, status: str, current_user: dict = Depends(get_current_user)):
+    """订单状态变更：按 (角色, 当前状态, 目标状态) 状态机校验。
+    取消订单在同一事务内恢复库存，与 delete 路径互不重叠。"""
+    status = (status or "").strip()
+    if not status:
+        raise CustomException("目标状态不能为空")
+
+    async with in_transaction():
+        order = await Orders.filter(id=id).select_for_update().first()
+        if order is None:
+            raise CustomException("订单不存在")
+        if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
+            raise CustomException("无权操作该订单")
+
+        key = (current_user["role"], order.status, status)
+        if key not in ALLOWED_TRANSITIONS:
+            raise CustomException(f"当前状态({order.status})不允许变更为({status})")
+
+        # 仅"已取消"是终态需要回补库存；其他正向流转不动库存
+        if status == ORDER_CANCELLED and order.status != ORDER_CANCELLED and order.goods_id:
+            goods = await Goods.filter(id=order.goods_id).select_for_update().first()
+            if goods:
+                goods.num += order.num
+                await goods.save(update_fields=['num'])
+
+        order.status = status
+        await order.save(update_fields=['status'])
+
+    return Result.success()
+
+
 @router.get("/selectPage")
-async def select(goodsName: str = "", userId: int = 0,  pageNum: int = 1, pageSize: int = 5,
+async def select(goodsName: str = "", userId: int = 0, status: str = "",
+                 pageNum: int = 1, pageSize: int = 5,
                  current_user: dict = Depends(get_current_user)):
     # 普通用户强制仅能查自己的订单，防止越权查询他人订单
     if current_user["role"] != "管理员":
@@ -96,6 +153,8 @@ async def select(goodsName: str = "", userId: int = 0,  pageNum: int = 1, pageSi
         query = query.filter(user_id=userId)
     if goodsName and goodsName != '':
         query = query.filter(goods__name__contains=goodsName)
+    if status and status != '':
+        query = query.filter(status=status)
 
     query = query.prefetch_related("address", "user", "goods")
     # 获取分页数据
