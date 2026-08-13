@@ -14,9 +14,10 @@ def _csv_env(name: str, default: str) -> list[str]:
 
 # ---- 运行环境 / 前后端跨域 ----
 APP_ENV = os.getenv("APP_ENV", "development").lower()
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Shanghai")
 CORS_ORIGINS = _csv_env(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173",
+    "http://localhost:5173,http://127.0.0.1:5173,https://smart-cake-store.vercel.app",
 )
 # 开发服务器可能自动选择其他端口；生产环境只接受 CORS_ORIGINS 白名单。
 CORS_ORIGIN_REGEX = (
@@ -56,7 +57,7 @@ TORTOISE_ORM = {
       }
     },
     "use_tz": True,
-    "timezone": "Asia/Shanghai"
+    "timezone": APP_TIMEZONE
 }
 
 # ---- 智能问答 / LLM ----
