@@ -31,6 +31,12 @@ setup_exceptions(app)
 async def root():
     return Result.success()
 
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok"
+    }
+
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True, port=9090, reload_dirs=["api", "agents", "common"])
 
