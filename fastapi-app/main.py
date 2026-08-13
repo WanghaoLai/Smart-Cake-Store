@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 import uvicorn
+from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
 from tortoise.contrib.fastapi import register_tortoise
 
@@ -14,6 +15,7 @@ app = FastAPI()
 # 前后端分离部署：生产环境使用显式来源白名单，避免任意站点调用业务 API。
 app.add_middleware(
     CORSMiddleware,
+    allow_credentials=True,
     allow_origins=CORS_ORIGINS,
     allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -30,12 +32,6 @@ setup_exceptions(app)
 @app.get("/")
 async def root():
     return Result.success()
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok"
-    }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True, port=9090, reload_dirs=["api", "agents", "common"])
