@@ -14,6 +14,7 @@ from .chat import router as chat_router
 from .favorite import router as favorite_router
 from .files import router as files_router
 from .goods import router as goods_router
+from .health import router as health_router
 from .index import router as index_router
 from .knowledge import router as knowledge_router
 from .notice import router as notice_router
@@ -35,6 +36,7 @@ for router in (
     favorite_router,
     files_router,
     goods_router,
+    health_router,
     index_router,
     knowledge_router,
     notice_router,
