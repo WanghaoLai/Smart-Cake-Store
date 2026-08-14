@@ -208,7 +208,7 @@
 </template>
 
 <script setup>
-import { reactive, markRaw, onMounted } from "vue";
+import { reactive, markRaw, onMounted, onUnmounted } from "vue";
 import router from "@/router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -259,6 +259,27 @@ const loadCategories = () => {
   }).catch(() => {})
 }
 loadCategories()
+
+// 管理员在另一会话调整分类后，用户切回本标签页时侧栏菜单自动同步；
+// 静默执行不打扰用户，失败也忽略（已有列表保持不变）
+let focusHandler = null
+let visibilityHandler = null
+const refreshCategoriesSilently = () => {
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+  loadCategories()
+}
+onMounted(() => {
+  focusHandler = () => refreshCategoriesSilently()
+  visibilityHandler = () => {
+    if (document.visibilityState === 'visible') refreshCategoriesSilently()
+  }
+  window.addEventListener('focus', focusHandler)
+  document.addEventListener('visibilitychange', visibilityHandler)
+})
+onUnmounted(() => {
+  if (focusHandler) window.removeEventListener('focus', focusHandler)
+  if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler)
+})
 
 if (!data.user?.id) {
   ElMessage.error('请登录！')

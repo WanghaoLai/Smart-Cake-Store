@@ -136,7 +136,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, watch, markRaw, onMounted } from "vue";
+import { reactive, ref, watch, markRaw, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import request from "@/utils/request";
 import { ElMessage } from "element-plus";
@@ -288,10 +288,35 @@ const reset = () => {
   load()
 }
 
+// 静默刷新：用户切回标签页或路由参数变化时重拉分类/商品，
+// 保证管理员在另一会话新增分类/商品后用户能尽快看到，不打扰用户（无 toast）
+const refreshSilently = () => {
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+  request.get('/category/selectAll').then(res => {
+    if (res.code === '200') data.categoryList = res.data || []
+  }).catch(() => {})
+  load()
+}
+
+let focusHandler = null
+let visibilityHandler = null
+
 onMounted(() => {
   loadAddress()
   loadCategory()
   loadFavorites()
+  // 用户 alt-tab 切回或从其他标签页返回时静默刷新
+  focusHandler = () => refreshSilently()
+  visibilityHandler = () => {
+    if (document.visibilityState === 'visible') refreshSilently()
+  }
+  window.addEventListener('focus', focusHandler)
+  document.addEventListener('visibilitychange', visibilityHandler)
+})
+
+onUnmounted(() => {
+  if (focusHandler) window.removeEventListener('focus', focusHandler)
+  if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler)
 })
 
 watch(() => route.query.categoryName, (newName) => {
@@ -395,17 +420,18 @@ watch(() => route.query.name, (n) => {
 /* —— 商品卡片网格 —— */
 .goods-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  /* 桌面默认 5 列：让商品视图更紧凑，同屏可见更多款式，符合"简约时尚"的浏览节奏 */
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
 }
 
-@media (max-width: 1200px) { .goods-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 900px) { .goods-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px) { .goods-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1280px) { .goods-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 960px) { .goods-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .goods-grid { grid-template-columns: repeat(2, 1fr); } }
 
 .goods-card {
   background: var(--c-bg-card);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   overflow: hidden;
   border: none;
   box-shadow: var(--shadow-card);
@@ -416,14 +442,15 @@ watch(() => route.query.name, (n) => {
 }
 
 .goods-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
   box-shadow: var(--shadow-hover);
 }
 
 .goods-img-wrap {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  /* 1/1 方形比例：比 4/3 更省纵向空间，单元感更强，整体更克制 */
+  aspect-ratio: 1 / 1;
   overflow: hidden;
   background: var(--c-bg-soft);
 }
@@ -445,7 +472,7 @@ watch(() => route.query.name, (n) => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 10px;
+  padding: 8px;
   transition: opacity var(--t-base) var(--ease-out);
 }
 
@@ -454,20 +481,20 @@ watch(() => route.query.name, (n) => {
 .overlay-detail-hint {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
   color: var(--c-primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: var(--r-pill);
 }
 
-.overlay-detail-hint .el-icon { font-size: 14px; }
+.overlay-detail-hint .el-icon { font-size: 12px; }
 
 .overlay-btn {
-  width: 36px; height: 36px;
+  width: 30px; height: 30px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
@@ -476,7 +503,7 @@ watch(() => route.query.name, (n) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 15px;
   color: var(--c-text-regular);
   transition: all var(--t-fast) var(--ease-out);
 }
@@ -490,53 +517,55 @@ watch(() => route.query.name, (n) => {
 
 .goods-badge {
   position: absolute;
-  top: 10px; left: 10px;
+  top: 8px; left: 8px;
   background: rgba(255, 255, 255, 0.92);
   color: var(--c-primary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: var(--r-pill);
 }
 
 .goods-stock {
   position: absolute;
-  bottom: 10px; left: 10px;
-  font-size: 11px;
+  bottom: 8px; left: 8px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--c-success);
   background: rgba(255, 255, 255, 0.92);
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: var(--r-pill);
 }
 
 .goods-stock.out { color: var(--c-text-secondary); }
 
 .goods-info {
-  padding: 14px 16px 16px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
 }
 
 .goods-name {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--c-text-primary);
   margin: 0;
+  letter-spacing: 0.2px;
 }
 
 .goods-desc {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--c-text-secondary);
   margin: 0;
-  min-height: 36px;
+  min-height: 28px;
+  line-height: 1.45;
 }
 
 .goods-bottom {
   margin-top: auto;
-  padding-top: 8px;
+  padding-top: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -548,15 +577,15 @@ watch(() => route.query.name, (n) => {
   align-items: baseline;
 }
 
-.price-symbol { font-size: 14px; font-weight: 600; }
+.price-symbol { font-size: 12px; font-weight: 600; }
 .price-num {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1;
   font-feature-settings: "tnum";
 }
 .price-unit {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--c-text-secondary);
   margin-left: 2px;
 }
@@ -565,6 +594,9 @@ watch(() => route.query.name, (n) => {
   background: var(--grad-primary);
   border: none;
   font-weight: 500;
+  padding: 6px 12px;
+  font-size: 12px;
+  height: auto;
 }
 
 /* —— 分页 —— */

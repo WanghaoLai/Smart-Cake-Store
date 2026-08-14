@@ -1,8 +1,13 @@
 """Read-only product search, ranking, recommendation and stock queries."""
 import re
+from dataclasses import dataclass
 
-from models import Goods
+from pydantic import BaseModel, Field
 
+from models import Favorite, Goods, Orders, Review
+
+
+# ==================== 文本相关性打分（Grounding 与工具共享） ====================
 
 _QUERY_NOISE = set("的了吗呢啊呀有是和与或请问一下帮我看看想要需要推荐商品蛋糕")
 _PREFERENCE_GROUPS = (
@@ -20,8 +25,12 @@ _PREFERENCE_GROUPS = (
 
 
 def _relevance(query: str, text: str) -> int:
-    """Small deterministic ranker used before the vector goods index is complete."""
-    normalized_query = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]", "", query.lower())
+    """Small deterministic ranker combining exact / ngram / preference signals.
+
+    Same algorithm is shared by Grounding (get_product_facts) and the
+    recommend_cake tool, so tool output and grounding evidence never diverge.
+    """
+    normalized_query = re.sub(r"[^0-9a-zA-Z一-鿿]", "", query.lower())
     normalized_text = text.lower()
     useful = {char for char in normalized_query if char not in _QUERY_NOISE}
     overlap = sum(1 for char in useful if char in normalized_text)
@@ -39,17 +48,143 @@ def _relevance(query: str, text: str) -> int:
     return exact_bonus + phrase_score + preference_score + overlap
 
 
-async def search_products(query: str, limit: int = 8) -> tuple[list[dict], int]:
-    rows = await Goods.all().limit(200).values(
-        "id", "name", "price", "num", "unit", "description"
+# ==================== 个性化打分 ====================
+#
+# 权重校准原则：
+#   - _relevance 量级：exact_bonus 100、phrase_score 0~120、preference 30*N
+#   - 个性化量级：分类命中 40 + 收藏 25 + 评价 ±20（rating 1~5 → -20~+20）
+#   - 强文本命中（≈200）仍压过纯个性化（≈85），个性化在并列时拉新顺序；
+#   - 无任何信号时（匿名用户、空订单/收藏/评价）个性化分量为 0，退化为纯文本排序。
+WEIGHT_CATEGORY_MATCH = 40   # 用户最近购买分类命中
+WEIGHT_FAVORITE = 25         # 用户收藏命中
+WEIGHT_RATING_PER_STAR = 10  # 评价均分相对基线 3 分的权重
+RATING_BASELINE = 3
+RECENT_ORDERS_FOR_PROFILE = 3
+
+
+@dataclass(frozen=True)
+class UserProfile:
+    """Per-user preference signals aggregated from MySQL.
+
+    Each field degrades gracefully (empty) when the user has no data so that
+    the ranker falls back to pure text relevance.
+    """
+    recent_category_ids: frozenset[int]
+    favorite_goods_ids: frozenset[int]
+    rating_by_goods: dict[int, float]
+
+
+async def _load_user_profile(user_id: int | None) -> UserProfile | None:
+    """Return None for anonymous users so the caller can skip personalization.
+
+    For authenticated users, three signals are pulled in parallel-friendly
+    sequence: recent order categories, favorite goods ids, and per-goods
+    rating averages (computed in Python; rating rows are bounded by review
+    count which is small for this domain).
+    """
+    if user_id is None:
+        return None
+
+    recent_orders = await (
+        Orders.filter(user_id=user_id)
+        .order_by("-id")
+        .limit(RECENT_ORDERS_FOR_PROFILE)
+        .prefetch_related("goods")
     )
+    recent_category_ids = frozenset(
+        order.goods.category_id
+        for order in recent_orders
+        if order.goods_id is not None
+        and order.goods is not None
+        and order.goods.category_id is not None
+    )
+
+    favorite_goods_ids = frozenset(
+        await Favorite.filter(user_id=user_id).values_list("goods_id", flat=True)
+    )
+
+    review_rows = await Review.all().values("goods_id", "rating")
+    rating_buckets: dict[int, list[float]] = {}
+    for row in review_rows:
+        goods_id = row.get("goods_id")
+        rating = row.get("rating")
+        if goods_id is None or rating is None:
+            continue
+        rating_buckets.setdefault(goods_id, []).append(float(rating))
+    rating_by_goods = {
+        goods_id: sum(values) / len(values)
+        for goods_id, values in rating_buckets.items()
+    }
+
+    return UserProfile(
+        recent_category_ids=recent_category_ids,
+        favorite_goods_ids=favorite_goods_ids,
+        rating_by_goods=rating_by_goods,
+    )
+
+
+def _personalization_score(row: dict, profile: UserProfile) -> float:
+    """Per-row bonus added on top of _relevance.
+
+    Returns 0 when every signal is empty, which means the row keeps its pure
+    text-relevance score and the ranker behaves identically to anonymous mode.
+    """
+    score = 0.0
+    if row.get("category_id") in profile.recent_category_ids:
+        score += WEIGHT_CATEGORY_MATCH
+    if row.get("id") in profile.favorite_goods_ids:
+        score += WEIGHT_FAVORITE
+    avg_rating = profile.rating_by_goods.get(row.get("id"))
+    if avg_rating is not None:
+        score += (avg_rating - RATING_BASELINE) * WEIGHT_RATING_PER_STAR
+    return score
+
+
+# ==================== 结构化查询 ====================
+
+
+class RecommendationQuery(BaseModel):
+    """Structured recommendation input.
+
+    `search_text()` composes a single string so that _PREFERENCE_GROUPS
+    triggers fire on `occasion` and `audience` exactly like the legacy path,
+    while `max_price` and `in_stock_only` are applied as hard filters.
+    """
+    keywords: str = Field(default="", max_length=100, description="口味、原料、商品名等关键词")
+    occasion: str | None = Field(default=None, description="送礼场景：长辈/孩子/情侣/朋友/聚会")
+    audience: str | None = Field(default=None, description="目标受众：女生/男生/女朋友/闺蜜")
+    max_price: float | None = Field(default=None, ge=0, description="预算上限（含），未明确时留空")
+    in_stock_only: bool = Field(default=True, description="True 仅返回有库存商品")
+
+    def search_text(self) -> str:
+        parts = [self.keywords.strip(), (self.occasion or "").strip(), (self.audience or "").strip()]
+        return " ".join(part for part in parts if part)
+
+
+# ==================== 候选检索 + 排序 ====================
+
+
+async def search_products(
+    query: str,
+    limit: int = 8,
+    in_stock_only: bool = False,
+) -> tuple[list[dict], int]:
+    """Load bounded candidate pool from MySQL, attach _relevance + category_id.
+
+    Returning _relevance on each row lets downstream rankers (e.g.
+    recommend_cake) combine text score with personalization without
+    recomputing it.
+    """
+    rows = await Goods.all().limit(200).values(
+        "id", "name", "price", "num", "unit", "description", "category_id"
+    )
+    if in_stock_only:
+        rows = [row for row in rows if row["num"] > 0]
+    for row in rows:
+        row["_relevance"] = _relevance(query, f"{row['name']} {row.get('description') or ''}")
     ranked = sorted(
         rows,
-        key=lambda row: (
-            _relevance(query, f"{row['name']} {row.get('description') or ''}"),
-            row["num"] > 0,
-            -row["id"],
-        ),
+        key=lambda row: (row["_relevance"], row["num"] > 0, -row["id"]),
         reverse=True,
     )[:limit]
     return ranked, len(rows)
@@ -70,21 +205,63 @@ async def get_product_facts(query: str, limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-async def recommend_cake(preference: str = "") -> str:
-    if preference:
-        goods_list = await Goods.filter(name__contains=preference).limit(5)
-        if not goods_list:
-            goods_list = await Goods.filter(description__contains=preference).limit(5)
-    else:
-        goods_list = await Goods.all().limit(5)
+async def recommend_cake(
+    query: RecommendationQuery | str | None = None,
+    *,
+    user_id: int | None = None,
+    check_stock: bool | None = None,
+) -> str:
+    """Personalized cake recommendation.
 
-    if not goods_list:
-        goods_list = await Goods.all().limit(5)
+    Pipeline:
+      1) Compose search_text from structured query; pull top-20 candidates via
+         search_products (text-relevance ranked, in_stock pre-filter).
+      2) Apply max_price ceiling.
+      3) Load UserProfile when user_id is given; add per-row personalization
+         bonus to _relevance.
+      4) Re-rank by combined score and take top 5.
+
+    Anonymous users (user_id=None) and empty profiles degrade to pure text
+    relevance, identical to the previous behavior.
+    """
+    if isinstance(query, str):
+        query = RecommendationQuery(keywords=query)
+    elif query is None:
+        query = RecommendationQuery()
+    if check_stock is not None:
+        query = query.model_copy(update={"in_stock_only": check_stock})
+
+    candidates, _ = await search_products(
+        query.search_text(),
+        limit=20,
+        in_stock_only=query.in_stock_only,
+    )
+
+    if query.max_price is not None:
+        candidates = [row for row in candidates if (row.get("price") or 0) <= query.max_price]
+
+    profile = await _load_user_profile(user_id)
+    for row in candidates:
+        personal = _personalization_score(row, profile) if profile is not None else 0.0
+        row["_score"] = row["_relevance"] + personal
+
+    ranked = sorted(
+        candidates,
+        key=lambda row: (row["_score"], row["num"] > 0, -row["id"]),
+        reverse=True,
+    )[:5]
+
+    if not ranked:
+        return "当前商品库中没有可推荐的蛋糕。"
 
     lines = ["为您推荐以下蛋糕："]
-    for i, g in enumerate(goods_list, 1):
-        stock_info = "有货" if g.num > 0 else "暂时售罄"
-        lines.append(f"{i}. {g.name} - ¥{g.price}（{stock_info}，剩余{g.num}{g.unit or '个'}）\n   {g.description}")
+    for index, row in enumerate(ranked, 1):
+        stock_info = "有货" if row["num"] > 0 else "暂时售罄"
+        description = (row.get("description") or "暂无").replace("\n", " ")
+        lines.append(
+            f"{index}. {row['name']} - ¥{row['price']}（{stock_info}，剩余{row['num']}{row.get('unit') or '个'}）\n"
+            f"   {description}"
+        )
     return "\n".join(lines)
 
 
@@ -104,4 +281,11 @@ async def check_stock(goods_name: str = "") -> str:
     return "\n".join(lines)
 
 
-__all__ = ["check_stock", "get_product_facts", "recommend_cake", "search_products"]
+__all__ = [
+    "RecommendationQuery",
+    "UserProfile",
+    "check_stock",
+    "get_product_facts",
+    "recommend_cake",
+    "search_products",
+]

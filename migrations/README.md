@@ -7,6 +7,7 @@
 ├── ../cake_store.sql         # 基础 schema + 初始数据（全量 dump，含 address_region / goods_detail 字段）
 ├── 001_order_status.sql      # 给 orders 增加 status 列
 ├── 002_review.sql            # 创建 review 表
+├── 003_conversation_owner_identity.sql # 会话按角色 + ID 隔离用户与管理员
 └── archive/                  # 已废弃迁移：cake_store.sql 最新 dump 已包含其变更
     ├── migration_address_region.sql
     └── migration_goods_detail.sql

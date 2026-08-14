@@ -17,6 +17,7 @@ class AgentContext:
     user_id: int | None
     conversation_id: int | None
     user_message: str
+    recent_history: tuple[tuple[str, str], ...] = ()
 
 
 class ConversationMemory:

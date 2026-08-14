@@ -126,6 +126,12 @@ class CustomerServiceAgent:
             user_id=user_id,
             conversation_id=conversation_id,
             user_message=user_message,
+            recent_history=tuple(
+                (str(item.get("role", "")), str(item.get("content", "")))
+                for item in history[-6:]
+                if item.get("role") in {"user", "assistant"}
+                and isinstance(item.get("content"), str)
+            ),
         )
         config = {
             "run_name": self.profile.name,
