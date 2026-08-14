@@ -33,6 +33,7 @@ CREATE TABLE `_schema_migrations` (
 BEGIN;
 INSERT INTO `_schema_migrations` (`filename`, `applied_at`) VALUES ('001_order_status.sql', '2026-08-12 15:33:52');
 INSERT INTO `_schema_migrations` (`filename`, `applied_at`) VALUES ('002_review.sql', '2026-08-12 15:33:52');
+INSERT INTO `_schema_migrations` (`filename`, `applied_at`) VALUES ('003_conversation_owner_identity.sql', CURRENT_TIMESTAMP);
 COMMIT;
 
 -- ----------------------------
@@ -128,20 +129,20 @@ CREATE TABLE `conversation` (
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   `user_id` int NOT NULL,
+  `owner_role` varchar(32) NOT NULL DEFAULT '用户',
   PRIMARY KEY (`id`),
-  KEY `fk_conversa_user_84883661` (`user_id`),
-  CONSTRAINT `fk_conversa_user_84883661` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
+  KEY `idx_conversation_owner` (`owner_role`,`user_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- ----------------------------
 -- Records of conversation
 -- ----------------------------
 BEGIN;
-INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`) VALUES (4, '你好', '2026-06-04 13:05:50.697688', '2026-06-04 13:07:17.785803', 5);
-INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`) VALUES (9, '配送范围是什么', '2026-07-07 02:20:27.718161', '2026-07-07 02:20:48.482741', 3);
-INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`) VALUES (11, '推荐一款生日蛋糕', '2026-08-06 07:19:45.614089', '2026-08-06 15:19:48.701378', 1);
-INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`) VALUES (13, '推荐一款生日蛋糕', '2026-08-06 08:12:30.742840', '2026-08-06 16:12:59.677085', 1);
-INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`) VALUES (14, '你们有什么口味的蛋糕', '2026-08-12 02:54:27.126056', '2026-08-12 02:54:29.292745', 1);
+INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`, `owner_role`) VALUES (4, '你好', '2026-06-04 13:05:50.697688', '2026-06-04 13:07:17.785803', 5, '用户');
+INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`, `owner_role`) VALUES (9, '配送范围是什么', '2026-07-07 02:20:27.718161', '2026-07-07 02:20:48.482741', 3, '用户');
+INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`, `owner_role`) VALUES (11, '推荐一款生日蛋糕', '2026-08-06 07:19:45.614089', '2026-08-06 15:19:48.701378', 1, '用户');
+INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`, `owner_role`) VALUES (13, '推荐一款生日蛋糕', '2026-08-06 08:12:30.742840', '2026-08-06 16:12:59.677085', 1, '用户');
+INSERT INTO `conversation` (`id`, `title`, `created_at`, `updated_at`, `user_id`, `owner_role`) VALUES (14, '你们有什么口味的蛋糕', '2026-08-12 02:54:27.126056', '2026-08-12 02:54:29.292745', 1, '用户');
 COMMIT;
 
 -- ----------------------------

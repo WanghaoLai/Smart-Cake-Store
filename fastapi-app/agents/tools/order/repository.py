@@ -5,6 +5,12 @@ from tortoise.transactions import in_transaction
 from models import Goods, Orders
 
 
+ORDER_PENDING = "待发货"
+ORDER_SHIPPED = "已发货"
+ORDER_CANCELLED = "已取消"
+CANCELLABLE_STATUSES = {ORDER_PENDING, ORDER_SHIPPED}
+
+
 async def get_order_status(user_id: int, order_id: int = None, order_no: str = None) -> str:
     if order_id or order_no:
         filters = {"id": order_id} if order_id else {"order_no": order_no}
@@ -43,16 +49,22 @@ async def cancel_order(user_id: int, order_id: int = None, order_no: str = None)
         if not order:
             return "未找到该订单，无法取消。请确认订单号是否正确。"
 
-        goods_name = None
-        if order.goods_id:
-            goods = await Goods.filter(id=order.goods_id).select_for_update().first()
-            if goods:
-                goods.num += order.num
-                await goods.save(update_fields=["num"])
-                goods_name = goods.name
+        if order.status == ORDER_CANCELLED:
+            return f"订单 {order.order_no or order.id} 已经取消，无需重复操作。"
+        if order.status not in CANCELLABLE_STATUSES:
+            return f"订单 {order.order_no or order.id} 当前状态为“{order.status}”，不能取消。"
+
+        if not order.goods_id:
+            return "订单缺少商品信息，为避免库存不一致，暂时无法取消，请联系人工客服。"
+        goods = await Goods.filter(id=order.goods_id).select_for_update().first()
+        if not goods:
+            return "订单对应商品不存在，为避免库存不一致，暂时无法取消，请联系人工客服。"
+        goods.num += order.num
+        await goods.save(update_fields=["num"])
         order_label = order.order_no or order.id
-        await Orders.filter(id=order.id).delete()
-    return f"订单 {order_label} 已成功取消，{goods_name or '商品'} 库存已恢复。"
+        order.status = ORDER_CANCELLED
+        await order.save(update_fields=["status"])
+    return f"订单 {order_label} 已成功取消，{goods.name}的库存已恢复。"
 
 
 __all__ = ["cancel_order", "get_order_status"]

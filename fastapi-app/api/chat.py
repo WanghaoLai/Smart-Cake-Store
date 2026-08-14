@@ -1,6 +1,5 @@
 import json
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -21,10 +20,6 @@ router = APIRouter(prefix="/chat", dependencies=[Depends(get_current_user)])
 customer_service_agent = create_customer_service_agent()
 
 
-class ConversationCreate(BaseModel):
-    title: Optional[str] = Field(default="新对话", max_length=255)
-
-
 class MessageRequest(BaseModel):
     conversation_id: int
     message: str = Field(min_length=1, max_length=10000)
@@ -35,17 +30,24 @@ def _sse(payload: dict) -> str:
 
 
 @router.post("/conversation")
-async def create_conversation(data: ConversationCreate, current_user: dict = Depends(get_current_user)):
+async def create_conversation(
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a blank conversation without requiring a request payload."""
     conversation = await Conversation.create(
         user_id=current_user["user_id"],
-        title=data.title
+        owner_role=current_user["role"],
+        title="新对话",
     )
     return Result.success({"id": conversation.id, "title": conversation.title})
 
 
 @router.get("/conversations")
 async def get_conversations(current_user: dict = Depends(get_current_user)):
-    conversations = await Conversation.filter(user_id=current_user["user_id"]).order_by("-updated_at")
+    conversations = await Conversation.filter(
+        user_id=current_user["user_id"],
+        owner_role=current_user["role"],
+    ).order_by("-updated_at")
     result = []
     for conv in conversations:
         result.append({
@@ -62,7 +64,10 @@ async def _check_conversation_owner(conversation_id: int, current_user: dict) ->
     conversation = await Conversation.get_or_none(id=conversation_id)
     if conversation is None:
         raise CustomException("会话不存在")
-    if current_user["role"] != "管理员" and conversation.user_id != current_user["user_id"]:
+    if (
+        conversation.user_id != current_user["user_id"]
+        or conversation.owner_role != current_user["role"]
+    ):
         raise CustomException("无权访问该会话")
     return conversation
 

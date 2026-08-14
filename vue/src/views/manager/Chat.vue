@@ -6,7 +6,7 @@
           <el-icon><ChatDotRound /></el-icon>
           <span>会话列表</span>
         </div>
-        <el-button type="primary" class="new-btn" @click="createConversation">
+        <el-button type="primary" class="new-btn" @click="createConversation()">
           <el-icon><Plus /></el-icon>新对话
         </el-button>
       </div>
@@ -97,8 +97,8 @@
             type="textarea"
             :rows="1"
             :autosize="{ minRows: 1, maxRows: 4 }"
-            placeholder="输入您的问题，Ctrl+Enter 发送..."
-            @keydown.enter.ctrl="sendMessage"
+            placeholder="输入您的问题，Enter 发送，Shift+Enter 换行..."
+            @keydown="onInputKeydown"
             class="chat-input"
           />
           <button class="send-btn" @click="sendMessage" :disabled="!data.inputMessage.trim() || data.loading">
@@ -141,6 +141,8 @@ const data = reactive({
   status: '正在连接智能客服…'
 })
 
+let conversationCreation = null
+
 const renderMarkdown = (text) => DOMPurify.sanitize(marked.parse(text || ''))
 
 const formatTime = (t) => {
@@ -169,15 +171,33 @@ const loadConversations = async () => {
   } catch (e) { console.error('加载会话列表失败:', e) }
 }
 
-const createConversation = async () => {
-  try {
-    const res = await request.post('/chat/conversation', { title: '新对话' })
-    if (res.code === '200') {
-      await loadConversations()
+const createConversation = async (silent = false) => {
+  // 页面初始化和用户首次发送可能同时触发创建，共享同一个请求以避免重复会话。
+  if (!conversationCreation) {
+    conversationCreation = (async () => {
+      // 创建空会话是无参数操作，不发送 body，避免前后端 Payload 契约漂移导致 422。
+      const res = await request.post('/chat/conversation')
+      if (res.code !== '200' || !Number.isInteger(res.data?.id)) {
+        throw new Error(res.msg || '创建会话失败')
+      }
       data.currentConversation = res.data.id
       data.messages = []
+      await loadConversations()
+      return true
+    })().finally(() => {
+      conversationCreation = null
+    })
+  }
+
+  try {
+    return await conversationCreation
+  } catch (e) {
+    if (!silent) {
+      ElMessage.error('创建会话失败，请稍后重试')
     }
-  } catch (e) { ElMessage.error('创建会话失败') }
+    console.error('创建会话失败:', e)
+    return false
+  }
 }
 
 const switchConversation = async (conversationId) => {
@@ -213,11 +233,23 @@ const useSuggestion = (text) => {
   sendMessage()
 }
 
+const onInputKeydown = (e) => {
+  // 中文输入法选词阶段（isComposing=true）一律放行，避免 Enter 确认候选词时误发送
+  if (e.isComposing) return
+  // 仅当「裸 Enter」（无 Shift/Ctrl/Alt/Meta）时拦截并发送；Shift+Enter 走默认换行
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault()
+    sendMessage()
+  }
+}
+
 const sendMessage = async () => {
   if (!data.inputMessage.trim() || data.loading) return
 
+  // 当前无会话时尝试创建；用户主动发送场景下失败要明确告知，并保留输入内容以便重试
   if (!data.currentConversation) {
-    await createConversation()
+    const ok = await createConversation()
+    if (!ok) return
   }
 
   const userMessage = data.inputMessage.trim()
@@ -300,7 +332,17 @@ const sendMessage = async () => {
   }
 }
 
-onMounted(() => { loadConversations() })
+onMounted(async () => {
+  await loadConversations()
+  if (data.conversations.length > 0) {
+    // 后端按 updated_at 倒序返回，第一条即最新会话
+    await switchConversation(data.conversations[0].id)
+  } else {
+    // 无历史对话则尝试预创建新会话；silent=true 失败也不打扰用户：
+    // currentConversation 保持 null，banner + 输入框仍可用，用户首次发送时 sendMessage 会再尝试创建
+    await createConversation(true)
+  }
+})
 </script>
 
 <style scoped>

@@ -155,7 +155,9 @@ class Notice(Model):
 
 class Conversation(Model):
     id = fields.IntField(pk=True, null=False)
-    user = fields.ForeignKeyField('models.User', related_name='conversations')
+    # User 与 Admin 使用独立表，数字主键可能重叠；会话归属必须由角色 + ID 联合标识。
+    user_id = fields.IntField()
+    owner_role = fields.CharField(max_length=32, default='用户')
     title = fields.CharField(max_length=255, default='新对话')
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)

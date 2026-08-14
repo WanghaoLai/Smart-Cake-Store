@@ -88,6 +88,10 @@ class CustomerServiceAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["context"].user_id, 7)
         self.assertEqual(call["context"].conversation_id, 11)
         self.assertEqual(call["context"].user_message, "now")
+        self.assertEqual(
+            call["context"].recent_history,
+            (("user", "old"), ("assistant", "recent"), ("user", "latest")),
+        )
 
     async def test_model_credentials_are_checked_before_runtime_invocation(self):
         runtime = FakeAgentRuntime()

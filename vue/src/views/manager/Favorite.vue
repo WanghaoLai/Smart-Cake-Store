@@ -235,17 +235,18 @@ onMounted(() => {
 
 .goods-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  /* 桌面默认 5 列：与 Cake 页保持一致的紧凑节奏，让一屏可见更多收藏 */
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
 }
 
-@media (max-width: 1200px) { .goods-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 900px) { .goods-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px) { .goods-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1280px) { .goods-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 960px) { .goods-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .goods-grid { grid-template-columns: repeat(2, 1fr); } }
 
 .goods-card {
   background: var(--c-bg-card);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   overflow: hidden;
   border: none;
   box-shadow: var(--shadow-card);
@@ -256,14 +257,15 @@ onMounted(() => {
 }
 
 .goods-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
   box-shadow: var(--shadow-hover);
 }
 
 .goods-img-wrap {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  /* 1/1 方形比例：与 Cake 页一致，更省纵向空间，单元感更强 */
+  aspect-ratio: 1 / 1;
   overflow: hidden;
   background: var(--c-bg-soft);
 }
@@ -278,7 +280,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 10px;
+  padding: 8px;
   transition: opacity var(--t-base) var(--ease-out);
 }
 
@@ -287,51 +289,51 @@ onMounted(() => {
 .overlay-detail-hint {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
   color: var(--c-primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: var(--r-pill);
 }
 
-.overlay-detail-hint .el-icon { font-size: 14px; }
+.overlay-detail-hint .el-icon { font-size: 12px; }
 
 .goods-badge {
   position: absolute;
-  top: 10px; left: 10px;
+  top: 8px; left: 8px;
   background: rgba(255, 255, 255, 0.92);
   color: var(--c-primary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: var(--r-pill);
 }
 
 .goods-stock {
   position: absolute;
-  bottom: 10px; left: 10px;
-  font-size: 11px;
+  bottom: 8px; left: 8px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--c-success);
   background: rgba(255, 255, 255, 0.92);
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: var(--r-pill);
 }
 .goods-stock.out { color: var(--c-text-secondary); }
 
 .goods-info {
-  padding: 14px 16px 16px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
 }
 
-.goods-name { font-size: 16px; font-weight: 600; color: var(--c-text-primary); margin: 0; }
-.goods-desc { font-size: 12px; color: var(--c-text-secondary); margin: 0; min-height: 36px; }
+.goods-name { font-size: 14px; font-weight: 600; color: var(--c-text-primary); margin: 0; letter-spacing: 0.2px; }
+.goods-desc { font-size: 11.5px; color: var(--c-text-secondary); margin: 0; min-height: 28px; line-height: 1.45; }
 
 .goods-bottom {
   display: flex;
@@ -341,17 +343,25 @@ onMounted(() => {
 }
 
 .goods-price { color: var(--c-primary); display: flex; align-items: baseline; }
-.price-symbol { font-size: 14px; font-weight: 600; }
-.price-num { font-size: 22px; font-weight: 700; line-height: 1; font-feature-settings: "tnum"; }
-.price-unit { font-size: 12px; color: var(--c-text-secondary); margin-left: 2px; }
+.price-symbol { font-size: 12px; font-weight: 600; }
+.price-num { font-size: 18px; font-weight: 700; line-height: 1; font-feature-settings: "tnum"; }
+.price-unit { font-size: 11px; color: var(--c-text-secondary); margin-left: 2px; }
 
 .card-actions {
   display: flex;
-  gap: 8px;
-  padding-top: 8px;
-  margin-top: 4px;
+  gap: 6px;
+  padding-top: 6px;
+  margin-top: 2px;
   border-top: 1px dashed var(--c-divider);
 }
+
+/* 紧凑卡片下的双行动按钮：去掉图标的右边距，按钮内边距收紧 */
+.card-actions :deep(.el-button) {
+  padding: 6px 10px;
+  font-size: 12px;
+  flex: 1;
+}
+.card-actions :deep(.el-button .el-icon) { margin-right: 2px; font-size: 13px; }
 
 .ghost-btn {
   background: var(--c-bg-soft);
