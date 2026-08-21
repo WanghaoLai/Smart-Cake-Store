@@ -398,7 +398,7 @@ CREATE TABLE `notice` (
 -- Records of notice
 -- ----------------------------
 BEGIN;
-INSERT INTO `notice` (`id`, `name`, `content`, `time`) VALUES (1, '智能蛋糕商城系统', '智能蛋糕商城系统Beta版今日已上线！', '2026-05-19 21:10:13');
+INSERT INTO `notice` (`id`, `name`, `content`, `time`) VALUES (1, '智能商城导购与运营平台', '智能商城导购与运营平台Beta版今日已上线！', '2026-05-19 21:10:13');
 INSERT INTO `notice` (`id`, `name`, `content`, `time`) VALUES (2, '111', '111111111111111111111111111111111111111111111111111111', '2026-05-19 21:10:45');
 COMMIT;
 

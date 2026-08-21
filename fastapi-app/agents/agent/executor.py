@@ -135,7 +135,7 @@ class CustomerServiceAgent:
         )
         config = {
             "run_name": self.profile.name,
-            "tags": ["cake-store", "customer-service"],
+            "tags": ["smart-mall", "customer-service"],
             "metadata": {
                 "conversation_id": conversation_id,
                 "grounding_sources": grounding_sources,

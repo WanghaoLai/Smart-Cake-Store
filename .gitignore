@@ -8,11 +8,11 @@
 **/.env.local
 **/.env.*.local
 
-# 豁免：示例模板（公开）+ Vite 的开发/生产模式配置（仅放公开 baseURL）
+# 豁免：示例模板（公开）；vue 的开发/生产环境配置含部署地址，改为本地文件不入库
 !.env.example
 !**/.env.example
-!vue/.env.development
-!vue/.env.production
+vue/.env.development
+vue/.env.production
 
 # ============================================================
 # Python
