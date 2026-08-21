@@ -12,7 +12,7 @@
             {{ greeting }}
           </span>
           <h2 class="hello-title">
-            {{ data.user.name || '朋友' }}，<br/>欢迎回到 <span class="text-gradient">甜心烘焙</span>
+            {{ data.user.name || '朋友' }}，<br/>欢迎回到 <span class="text-gradient">智能商城导购与运营平台</span>
           </h2>
           <p class="hello-desc">{{ data.user.role === '管理员' ? '今日运营数据一览，一切尽在掌握' : '挑选一款蛋糕，开启今天的甜蜜时刻' }}</p>
           <div class="hero-cta" v-if="data.user.role === '用户'">

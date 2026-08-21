@@ -45,7 +45,7 @@
           <div class="banner-icon">
             <el-icon><MagicStick /></el-icon>
           </div>
-          <h2 class="banner-title">小熊智能客服 🍰</h2>
+          <h2 class="banner-title">智能导购客服</h2>
           <p class="banner-sub">基于知识库 + 商品数据，为您提供 7×12 智能咨询</p>
           <div class="banner-suggestions">
             <button class="sugg-chip" v-for="s in suggestions" :key="s" @click="useSuggestion(s)">

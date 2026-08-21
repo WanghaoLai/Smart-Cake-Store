@@ -5,7 +5,7 @@
       <div class="hero-inner">
         <div class="brand">
           <img src="@/assets/imgs/logo.png" alt="logo" class="brand-logo" />
-          <span class="brand-name">甜心烘焙 Sweet Hearts Bakery</span>
+          <span class="brand-name">智能商城导购与运营平台</span>
         </div>
         <h1 class="hero-title">每一口<br/>都是<span class="text-gradient">甜蜜时光</span></h1>
         <p class="hero-desc">精选天然食材，手工烘焙制作<br/>为每一个值得纪念的瞬间，定制专属蛋糕</p>

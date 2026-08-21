@@ -1,4 +1,4 @@
-"""LangChain tools for authenticated cake-store business operations."""
+"""LangChain tools for authenticated smart-mall business operations."""
 
 import logging
 from datetime import datetime

@@ -10,8 +10,8 @@
           <div class="brand" @click="router.push('/manager/home')">
             <img src="@/assets/imgs/logo.png" alt="logo" class="brand-logo" />
             <div class="brand-text">
-              <div class="brand-name">甜心烘焙</div>
-              <div class="brand-tag">Sweet Hearts Bakery</div>
+              <div class="brand-name">智能商城导购与运营平台</div>
+              <div class="brand-tag">Smart Mall Guide &amp; Operations Platform</div>
             </div>
           </div>
         </div>
@@ -83,13 +83,13 @@
             <template #title>系统首页</template>
           </el-menu-item>
 
-          <!-- 用户：蛋糕商城 -->
+          <!-- 用户：导购商城 -->
           <el-sub-menu index="cake-shop" v-if="data.user.role === '用户'">
             <template #title>
               <el-icon>
                 <Cherry/>
               </el-icon>
-              <span>蛋糕商城</span>
+              <span>导购商城</span>
             </template>
             <el-menu-item index="/manager/cake">
               <el-icon>
@@ -200,7 +200,7 @@
       <main class="app-content">
         <router-view @updateUser="updateUser" />
         <footer class="app-footer">
-          <span>© {{ new Date().getFullYear() }} 甜心烘焙 Sweet Hearts Bakery · 智能蛋糕商城</span>
+          <span>© {{ new Date().getFullYear() }} 智能商城导购与运营平台</span>
         </footer>
       </main>
     </div>
