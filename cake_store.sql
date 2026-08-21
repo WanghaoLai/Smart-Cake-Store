@@ -414,7 +414,7 @@ CREATE TABLE `orders` (
   `goods_id` int DEFAULT NULL COMMENT '商品ID',
   `address_id` int DEFAULT NULL COMMENT '地址ID',
   `time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '下单时间',
-  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT '待发货' COMMENT '订单状态：待发货/已发货/已签收/已评价/已取消',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT '待发货' COMMENT '订单状态：待发货（默认）/ 已发货 / 待评价 / 已评价 / 已取消',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单信息';
 
