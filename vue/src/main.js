@@ -4,6 +4,7 @@ import router from './router'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import { fileUrl } from '@/utils/fileUrl'
 
 import '@/assets/css/global.css'
 
@@ -13,6 +14,8 @@ app.use(router)
 app.use(ElementPlus, {
     locale: zhCn,
 })
+// 模板内直接 $fileUrl(...) 把库里的相对文件路径拼成当前环境的绝对地址
+app.config.globalProperties.$fileUrl = fileUrl
 app.mount('#app')
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {

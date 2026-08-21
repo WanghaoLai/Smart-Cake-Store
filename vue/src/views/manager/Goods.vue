@@ -16,7 +16,7 @@
         <el-table-column label="商品" prop="name" min-width="280">
           <template #default="scope">
             <div class="goods-cell">
-              <el-image v-if="scope.row.img" preview-teleported :src="scope.row.img" :preview-src-list="[scope.row.img]" class="cell-img" fit="cover" />
+              <el-image v-if="scope.row.img" preview-teleported :src="$fileUrl(scope.row.img)" :preview-src-list="[$fileUrl(scope.row.img)]" class="cell-img" fit="cover" />
               <div v-else class="cell-img placeholder"><el-icon><Picture /></el-icon></div>
               <div class="goods-info-cell">
                 <div class="goods-name-cell line1">{{ scope.row.name }}</div>
@@ -175,6 +175,7 @@
 <script setup>
 import { reactive, ref, watch } from "vue";
 import request from "@/utils/request";
+import { fileUrl } from "@/utils/fileUrl";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Search, Plus, Edit, Delete, Refrigerator, Picture, Document } from "@element-plus/icons-vue";
 
@@ -233,7 +234,8 @@ const handleAdd = () => {
 
 const handleEdit = (row) => {
   data.form = JSON.parse(JSON.stringify(row))
-  data.fileList = row.img ? [{ name: 'img', url: row.img }] : []
+  // 上传组件预览需要绝对地址；表单里存的仍是相对路径
+  data.fileList = row.img ? [{ name: 'img', url: fileUrl(row.img) }] : []
   data.formVisible = true
 }
 

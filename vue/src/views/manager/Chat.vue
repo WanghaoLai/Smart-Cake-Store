@@ -64,7 +64,7 @@
 
         <div v-for="(msg, index) in data.messages" :key="index" :class="['message-row', msg.role]">
           <div class="message-avatar">
-            <el-avatar v-if="msg.role === 'user'" :size="36" :src="data.user.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
+            <el-avatar v-if="msg.role === 'user'" :size="36" :src="$fileUrl(data.user.avatar) || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
             <div v-else class="bot-avatar">
               <el-icon><MagicStick /></el-icon>
             </div>
@@ -276,6 +276,12 @@ const sendMessage = async () => {
     })
 
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    // 后端业务错误（限流/无权限等）返回普通 JSON 而非 SSE 流
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      const err = await response.json()
+      throw new Error(err.msg || '发送失败')
+    }
     if (!response.body) throw new Error('浏览器不支持流式响应')
 
     const reader = response.body.getReader()
@@ -324,7 +330,7 @@ const sendMessage = async () => {
   } catch (e) {
     const lastMsg = data.messages[data.messages.length - 1]
     if (lastMsg?.role === 'assistant' && !lastMsg.content) data.messages.pop()
-    ElMessage.error('发送消息失败')
+    ElMessage.error(e?.message || '发送消息失败')
     console.error(e)
   } finally {
     data.loading = false

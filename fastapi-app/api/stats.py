@@ -1,10 +1,25 @@
 from fastapi import APIRouter, Depends
+from tortoise.functions import Sum
 
+from api.orders import ORDER_CANCELLED, ORDER_PENDING, ORDER_SHIPPED
 from common.auth import get_current_user
 from common.result import Result
 from models import Goods, Orders, Notice, Favorite
 
 router = APIRouter(prefix="/stats", dependencies=[Depends(get_current_user)])
+
+
+async def _sum_revenue(**filters) -> float:
+    """数据库端 SUM 聚合：避免把全量订单行拉进内存做 Python 求和。
+
+    口径：排除已取消订单（钱没有实际发生）；无快照价的旧单（商品已删）按 0 计。"""
+    row = await (
+        Orders.exclude(status=ORDER_CANCELLED)
+        .filter(**filters)
+        .annotate(total=Sum("total_price"))
+        .values_list("total", flat=True)
+    )
+    return float(row[0] or 0)
 
 
 @router.get("/home")
@@ -18,12 +33,8 @@ async def home_stats(current_user: dict = Depends(get_current_user)):
         orders_count = await Orders.all().count()
         # 低库存预警（库存 ≤ 5）
         low_stock = await Goods.filter(num__lte=5).count()
-        # 总销售额：所有订单总价
-        orders_with_goods = await Orders.all().prefetch_related("goods")
-        revenue = sum(
-            (o.goods.price * o.num) if o.goods else 0
-            for o in orders_with_goods
-        )
+        # 总销售额：数据库聚合，排除已取消
+        revenue = await _sum_revenue()
         # 最近 5 条公告
         notices = await Notice.all().order_by("-id").limit(5)
         # 最近 6 笔订单
@@ -55,10 +66,10 @@ async def home_stats(current_user: dict = Depends(get_current_user)):
     # 普通用户
     my_orders = await Orders.filter(user_id=user_id).count()
     my_favs = await Favorite.filter(user_id=user_id).count()
-    pending = await Orders.filter(user_id=user_id).count()  # 当前未区分状态，全部视为进行中
-    # 累计消费
-    my_orders_qs = await Orders.filter(user_id=user_id).prefetch_related("goods")
-    spent = sum((o.goods.price * o.num) if o.goods else 0 for o in my_orders_qs)
+    # 进行中 = 尚在流转的订单（待发货/已发货）；已评价/已取消是终态
+    pending = await Orders.filter(user_id=user_id, status__in=[ORDER_PENDING, ORDER_SHIPPED]).count()
+    # 累计消费：数据库聚合，排除已取消
+    spent = await _sum_revenue(user_id=user_id)
     # 推荐：取库存 > 0 的前 4 件最新商品
     recommend_qs = await Goods.filter(num__gt=0).order_by("-id").limit(4).prefetch_related("category")
     recommends = [

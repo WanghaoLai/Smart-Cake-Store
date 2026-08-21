@@ -12,6 +12,12 @@ import ElementPlus from 'unplugin-element-plus/vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // marked/dompurify 只被懒加载的 Chat.vue 引用，不在启动依赖图内；
+  // 不预构建时 Vite 会在登录后预取全部页面 chunk 时才发现它们，
+  // 触发运行期 re-optimize 并推送整页 reload（表现为"登录后自动刷新一次"）。
+  optimizeDeps: {
+    include: ['marked', 'dompurify'],
+  },
   plugins: [
     vue(),
     AutoImport({

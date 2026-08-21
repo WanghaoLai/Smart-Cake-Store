@@ -14,7 +14,7 @@
         <el-table-column label="用户" prop="username" min-width="240">
           <template #default="scope">
             <div class="user-cell">
-              <img v-if="scope.row.avatar" :src="scope.row.avatar" class="cell-avatar" alt="avatar" />
+              <img v-if="scope.row.avatar" :src="$fileUrl(scope.row.avatar)" class="cell-avatar" alt="avatar" />
               <div v-else class="cell-avatar placeholder">{{ (scope.row.name || 'U').charAt(0) }}</div>
               <div class="user-info-cell">
                 <div class="user-name-cell">{{ scope.row.name }}</div>
@@ -70,7 +70,7 @@
         </el-form-item>
         <el-form-item label="头像" prop="avatar">
           <el-upload :action="uploadUrl" :show-file-list="false" :on-success="handleImgSuccess" :headers="uploadHeaders" class="avatar-uploader">
-            <img v-if="data.form.avatar" :src="data.form.avatar" class="avatar" />
+            <img v-if="data.form.avatar" :src="$fileUrl(data.form.avatar)" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>

@@ -24,7 +24,7 @@
     <div v-if="filteredData.length" class="goods-grid">
       <article v-for="item in filteredData" :key="item.id" class="goods-card" @click="$router.push('/manager/cake/' + item.id)">
         <div class="goods-img-wrap">
-          <img :src="item.img" :alt="item.name" class="goods-img" />
+          <img :src="$fileUrl(item.img)" :alt="item.name" class="goods-img" />
           <div class="goods-overlay">
             <div class="overlay-detail-hint">
               <el-icon><View /></el-icon>

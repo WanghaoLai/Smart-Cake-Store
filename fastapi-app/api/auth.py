@@ -3,7 +3,13 @@
 from fastapi import APIRouter, Depends
 
 from api.auth_schemas import LoginRequest, PasswordUpdateRequest, RegisterRequest
-from common.auth import create_access_token, get_current_user, hash_password, verify_password
+from common.auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    validate_password,
+    verify_password,
+)
 from common.exception_handler import CustomException
 from common.result import Result
 from models import Admin, User
@@ -51,6 +57,7 @@ async def login(account: LoginRequest):
 async def register(account: RegisterRequest):
     if await User.get_or_none(username=account.username) is not None:
         raise CustomException("账号重复")
+    validate_password(account.password)
     await User.create(
         username=account.username,
         password=hash_password(account.password),
@@ -72,7 +79,8 @@ async def update_password(account: PasswordUpdateRequest, current_user: dict = D
     if not verify_password(account.password, user.password)[0]:
         raise CustomException("原密码错误")
     if verify_password(account.newPassword, user.password)[0]:
-        raise CustomException("新密码不能原密码跟相同")
+        raise CustomException("新密码不能与原密码相同")
+    validate_password(account.newPassword)
     await model.filter(id=user_id).update(
         password=hash_password(account.newPassword),
         must_change_password=False,

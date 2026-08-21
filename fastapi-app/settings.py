@@ -63,6 +63,10 @@ TORTOISE_ORM = {
 # ---- 智能问答 / LLM ----
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 
+# /chat/send 限流：每用户每窗口期最多 N 条（每条 = 一次 LLM + Embedding 成本）
+CHAT_RATE_LIMIT = int(os.getenv("CHAT_RATE_LIMIT", "20"))
+CHAT_RATE_WINDOW_SECONDS = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
+
 AI_CONFIG = {
     "dashscope_api_key": DASHSCOPE_API_KEY,
     "model": os.getenv("LLM_MODEL", "qwen-turbo"),

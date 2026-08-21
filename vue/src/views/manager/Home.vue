@@ -79,7 +79,7 @@
           <div class="recommend-grid">
             <div v-for="r in data.stats.recommends" :key="r.id" class="recommend-item" @click="goCake(r)">
               <div class="recommend-img">
-                <img :src="r.img" :alt="r.name" />
+                <img :src="$fileUrl(r.img)" :alt="r.name" />
                 <div class="recommend-tag" v-if="r.categoryName">{{ r.categoryName }}</div>
               </div>
               <div class="recommend-name line1">{{ r.name }}</div>
@@ -98,7 +98,7 @@
           </div>
           <div class="recent-order-list">
             <div v-for="o in data.stats.recentOrders" :key="o.id" class="recent-order">
-              <img v-if="o.goodsImg" :src="o.goodsImg" class="recent-img" />
+              <img v-if="o.goodsImg" :src="$fileUrl(o.goodsImg)" class="recent-img" />
               <div v-else class="recent-img placeholder"><el-icon><Picture /></el-icon></div>
               <div class="recent-main">
                 <div class="recent-name line1">{{ o.goodsName }}</div>

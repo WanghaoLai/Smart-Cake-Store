@@ -43,7 +43,7 @@
     <div v-if="data.tableData.length" class="goods-grid">
       <article v-for="item in data.tableData" :key="item.id" class="goods-card" @click="goDetail(item.id)">
         <div class="goods-img-wrap">
-          <img :src="item.img" :alt="item.name" class="goods-img" />
+          <img :src="$fileUrl(item.img)" :alt="item.name" class="goods-img" />
           <div class="goods-overlay">
             <button class="overlay-btn" @click.stop="toggleFav(item.id)" :class="{ active: data.favoritedIds[item.id] }">
               <el-icon><Star v-if="!data.favoritedIds[item.id]" /><StarFilled v-else /></el-icon>

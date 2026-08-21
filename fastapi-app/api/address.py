@@ -7,6 +7,7 @@ from tortoise.transactions import in_transaction
 
 from common.auth import get_current_user
 from common.exception_handler import CustomException
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Address, City, Province, Town
 
@@ -237,6 +238,7 @@ async def select_all(userId: int, current_user: dict = Depends(get_current_user)
 @router.get("/selectPage")
 async def select(address: str = "", userId: int = 0,  pageNum: int = 1, pageSize: int = 5,
                  current_user: dict = Depends(get_current_user)):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     # 普通用户强制仅能查自己的地址
     if current_user["role"] != "管理员":
         userId = current_user["user_id"]

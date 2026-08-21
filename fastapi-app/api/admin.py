@@ -3,8 +3,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 
-from common.auth import get_current_admin, hash_password
+from common.auth import get_current_admin, hash_password, validate_password
 from common.exception_handler import CustomException
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Admin
 
@@ -53,6 +54,7 @@ async def add(data: AdminCreate):
         raise CustomException("账号重复")
     name = data.name if data.name is not None else data.username
     password = data.password if data.password is not None else "admin"
+    validate_password(password)
     await Admin.create(
         username=data.username,
         password=hash_password(password),
@@ -68,6 +70,7 @@ async def add(data: AdminCreate):
 async def update(data: AdminUpdate):
     update_data = data.model_dump(exclude_unset=True, exclude={'id'})
     if 'password' in update_data:
+        validate_password(update_data['password'])
         update_data['password'] = hash_password(update_data['password'])
         # 管理员重置他人密码时，令其下次登录强制改密
         update_data['must_change_password'] = True
@@ -119,6 +122,7 @@ async def select_all(name: str = ""):
 
 @router.get("/selectPage")
 async def select_page(name: str = "", pageNum: int = 1, pageSize: int = 10):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     query = Admin.filter(name__contains=name)
     admin_list = await query.offset((pageNum - 1) * pageSize).limit(pageSize)
     admin_list = [AdminAdminView.model_validate(a).model_dump() for a in admin_list]

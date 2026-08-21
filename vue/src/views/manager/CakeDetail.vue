@@ -19,7 +19,7 @@
         <!-- 左侧：图片 -->
         <section class="gallery-card card">
           <div class="main-image">
-            <img :src="data.goods.img" :alt="data.goods.name" />
+            <img :src="$fileUrl(data.goods.img)" :alt="data.goods.name" />
             <div class="gallery-badge" v-if="data.goods.categoryName">{{ data.goods.categoryName }}</div>
             <div class="gallery-stock" :class="{ out: data.goods.num === 0 }">
               <template v-if="data.goods.num === 0">已售罄</template>
@@ -214,7 +214,7 @@
         <div v-else class="review-list">
           <div v-for="rv in data.reviews" :key="rv.id" class="review-item">
             <div class="review-left">
-              <el-avatar :size="40" :src="rv.userAvatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
+              <el-avatar :size="40" :src="$fileUrl(rv.userAvatar) || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
             </div>
             <div class="review-main">
               <div class="review-head">
@@ -227,7 +227,7 @@
                 <el-image
                   v-for="(img, idx) in rv.images"
                   :key="idx"
-                  :src="img"
+                  :src="$fileUrl(img)"
                   :preview-src-list="rv.images"
                   :initial-index="idx"
                   preview-teleported
@@ -270,7 +270,7 @@
       <el-form ref="formRef" :model="data.form" :rules="rules" label-position="top">
         <el-form-item label="商品">
           <div class="dialog-goods">
-            <img :src="data.goods.img" class="dialog-goods-img" />
+            <img :src="$fileUrl(data.goods.img)" class="dialog-goods-img" />
             <div class="dialog-goods-info">
               <div class="dialog-goods-name line1">{{ data.goods.name }}</div>
               <div class="dialog-goods-spec" v-if="data.selectedSpec">{{ data.selectedSpec }}</div>
