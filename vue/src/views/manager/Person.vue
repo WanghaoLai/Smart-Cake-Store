@@ -5,7 +5,7 @@
       <aside class="profile-side card">
         <div class="avatar-wrap">
           <el-upload :show-file-list="false" class="avatar-uploader" :action="uploadUrl" :on-success="handleFileUpload" :headers="uploadHeaders">
-            <img v-if="data.user.avatar" :src="data.user.avatar" class="avatar" />
+            <img v-if="data.user.avatar" :src="$fileUrl(data.user.avatar)" class="avatar" />
             <div v-else class="avatar placeholder">
               <el-icon><Plus /></el-icon>
             </div>

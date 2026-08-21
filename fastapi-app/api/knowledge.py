@@ -14,6 +14,10 @@ router = APIRouter(prefix="/knowledge", dependencies=[Depends(get_current_admin)
 
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx"}
 
+# 知识库文档比图片略大也合理，但必须有上限：无上限的全量读入 = 内存耗尽型 DoS
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
+CHUNK_SIZE = 1024 * 1024
+
 
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
@@ -21,7 +25,14 @@ async def upload(file: UploadFile = File(...)):
     if ext not in ALLOWED_EXTENSIONS:
         raise CustomException(f"不支持的文件格式: {ext}，仅支持 .txt .pdf .docx")
 
-    file_bytes = await file.read()
+    chunks = []
+    size = 0
+    while chunk := await file.read(CHUNK_SIZE):
+        size += len(chunk)
+        if size > MAX_UPLOAD_BYTES:
+            raise CustomException(f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB 大小限制")
+        chunks.append(chunk)
+    file_bytes = b"".join(chunks)
     if not file_bytes:
         raise CustomException("文件内容为空")
 

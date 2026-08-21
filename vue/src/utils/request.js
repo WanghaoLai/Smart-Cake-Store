@@ -28,9 +28,13 @@ request.interceptors.response.use(
         if (response.config.responseType === 'blob') {
             return res
         }
-        // 兼容服务端返回的字符串数据
-        if (typeof res === 'string') {
-            res = res ? JSON.parse(res) : res
+        // 兼容服务端返回的字符串数据；非 JSON 字符串直接透传，避免未捕获异常
+        if (typeof res === 'string' && res) {
+            try {
+                res = JSON.parse(res)
+            } catch (e) {
+                console.warn('响应不是合法 JSON，按原文处理:', res)
+            }
         }
         // 当权限验证不通过的时候给出提示
         if (res.code === '401') {
@@ -46,7 +50,7 @@ request.interceptors.response.use(
                 localStorage.removeItem('system-user');
                 router.push('/login');
             }
-            console.log('err' + error)
+            console.error('请求失败:', error)
             return Promise.reject(error)
         }
 )

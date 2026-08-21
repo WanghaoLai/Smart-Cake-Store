@@ -42,7 +42,8 @@ class Category(Model):
 class Goods(Model):
     id = fields.IntField(pk=True, null=False)
     name = fields.CharField(max_length=255, null=True)
-    price = fields.FloatField(null=True)
+    # 金额字段：DECIMAL(10,2)，浮点会在 sum 聚合中累积精度误差（0.1+0.2≠0.3）
+    price = fields.DecimalField(max_digits=10, decimal_places=2, null=True)
     description = fields.CharField(max_length=255, null=True)
     # 详情页扩展字段：从第一性原理出发，用户购买前需要确认
     # 配料（过敏原）/ 详细介绍 / 规格 / 保质期 / 净含量 / 产地 / 适用人数
@@ -111,7 +112,8 @@ class Town(Model):
 
 class Orders(Model):
     id = fields.IntField(pk=True, null=False)
-    order_no = fields.CharField(max_length=255, null=True)
+    # 唯一约束：订单号是用户查询订单的主键式凭据，同号会导致按号查询命中他人订单
+    order_no = fields.CharField(max_length=255, null=True, unique=True)
     num = fields.IntField(null=True)
     user = fields.ForeignKeyField('models.User', null=True)
     goods = fields.ForeignKeyField('models.Goods', null=True)
@@ -120,6 +122,9 @@ class Orders(Model):
     # 订单状态：待发货（默认）/ 已发货 / 待评价 / 已评价 / 已取消
     # 用定长短字符串而非独立状态表：状态集合小且稳定，避免多一次 join，前端直接展示
     status = fields.CharField(max_length=32, default='待发货', null=True)
+    # 成交价快照：下单时锁定商品单价 × 数量。管理员事后改价时，
+    # 历史订单金额与报表不随之漂移（审计要求）
+    total_price = fields.DecimalField(max_digits=10, decimal_places=2, null=True)
 
     class Meta:
         table = 'orders'

@@ -8,8 +8,9 @@ from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.transactions import in_transaction
 
-from common.auth import get_current_user
+from common.auth import get_current_admin, get_current_user
 from common.exception_handler import CustomException
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Review, Orders, Goods
 from api.orders import ORDER_PENDING_REVIEW, ORDER_REVIEWED
@@ -19,10 +20,11 @@ router = APIRouter(prefix="/reviews", dependencies=[Depends(get_current_user)])
 ReviewPydantic = pydantic_model_creator(Review)
 
 # 评价创建模型：rating(1-5)、content、images(JSON 字符串)、orderId
+# content/images 上限防止无界大文本写库（前端输入框同样限制 500 字、5 图）
 ReviewCreatePydantic = create_model(
     "ReviewCreatePydantic",
     rating=(int, Field(..., ge=1, le=5)),
-    content=(Optional[str], None),
+    content=(Optional[str], Field(None, max_length=500)),
     images=(Optional[str], None),  # JSON 字符串数组
     order_id=(int, Field(..., alias="orderId")),
     goods_id=(Optional[int], Field(None, alias="goodsId")),
@@ -98,6 +100,16 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
         if goods_id is None:
             raise CustomException("缺少商品信息")
 
+        # images 是 JSON 字符串：必须是数组且张数有界
+        images = review_pydantic.images
+        if images is not None:
+            try:
+                parsed = json.loads(images)
+            except json.JSONDecodeError:
+                raise CustomException("images 必须是 URL 数组的 JSON 字符串")
+            if not isinstance(parsed, list) or len(parsed) > 9:
+                raise CustomException("评价图片最多 9 张")
+
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         await Review.create(
             goods_id=goods_id,
@@ -122,15 +134,12 @@ async def list_by_goods(goods_id: int):
     return Result.success([_to_dict(r) for r in reviews])
 
 
-@router.put("/reply/{review_id}")
+@router.put("/reply/{review_id}", dependencies=[Depends(get_current_admin)])
 async def reply(
     review_id: int,
     payload: ReviewReplyPydantic,
-    current_user: dict = Depends(get_current_user),
 ):
     """管理员回复评价。仅管理员可操作；可多次编辑覆盖。"""
-    if current_user["role"] != "管理员":
-        raise CustomException("无管理员权限")
     review = await Review.get_or_none(id=review_id)
     if review is None:
         raise CustomException("评价不存在")
@@ -149,6 +158,7 @@ async def select_page(
     current_user: dict = Depends(get_current_user),
 ):
     """管理员评价分页：按商品名/星级筛选；只展示有 content 的评价。"""
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     if current_user["role"] != "管理员":
         raise CustomException("无管理员权限")
     query = Review.filter()

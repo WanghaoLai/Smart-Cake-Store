@@ -18,7 +18,7 @@
         <el-table-column label="商品" min-width="240">
           <template #default="scope">
             <div class="goods-cell">
-              <img v-if="scope.row.goodsImg" :src="scope.row.goodsImg" class="cell-img" alt="" />
+              <img v-if="scope.row.goodsImg" :src="$fileUrl(scope.row.goodsImg)" class="cell-img" alt="" />
               <div v-else class="cell-img placeholder"><el-icon><Picture /></el-icon></div>
               <div class="goods-info-cell">
                 <div class="goods-name-cell line1">{{ scope.row.goodsName }}</div>
@@ -44,7 +44,7 @@
               <el-image
                 v-for="(img, idx) in scope.row.images"
                 :key="idx"
-                :src="img"
+                :src="$fileUrl(img)"
                 :preview-src-list="scope.row.images"
                 :initial-index="idx"
                 preview-teleported

@@ -28,7 +28,8 @@ CATEGORY_IMAGES = {
     6: ['6-1.jpeg'],
     7: ['7-1.jpeg'],
 }
-BASE_IMG_URL = "http://127.0.0.1:9090/files/download"
+# 入库统一相对路径（files/download/...），绝对地址由前端按环境拼接
+BASE_IMG_URL = "files/download"
 
 
 def img_for(cat_id: int, idx: int) -> str:

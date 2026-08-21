@@ -6,6 +6,7 @@ from pydantic import create_model
 from tortoise.contrib.pydantic import pydantic_model_creator
 
 from common.auth import get_current_user, get_current_admin
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Notice
 
@@ -54,6 +55,7 @@ async def select_all(name: str = ""):
 
 @router.get("/selectPage", dependencies=[Depends(get_current_user)])
 async def select(name: str = "", page_num: int = 1, page_size: int = 5):
+    page_num, page_size = clamp_page(page_num, page_size)
     # 同时获取分页数据和总数
     query = Notice.filter(name__contains=name)
     # 获取分页数据

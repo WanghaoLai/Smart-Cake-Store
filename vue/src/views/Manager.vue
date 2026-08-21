@@ -41,7 +41,7 @@
 
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-chip">
-              <el-avatar :size="36" :src="data.user.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
+              <el-avatar :size="36" :src="$fileUrl(data.user.avatar) || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
               <div class="user-meta">
                 <div class="user-name">{{ data.user.name || '未登录' }}</div>
                 <div class="user-role">{{ data.user.role || '游客' }}</div>

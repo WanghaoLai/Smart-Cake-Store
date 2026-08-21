@@ -5,6 +5,7 @@ from pydantic import create_model
 from tortoise.contrib.pydantic import pydantic_model_creator
 
 from common.auth import get_current_user, get_current_admin
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Category
 
@@ -45,6 +46,7 @@ async def delete(user_id: int):
 
 @router.get("/selectPage", dependencies=[Depends(get_current_user)])
 async def select(name: str = "", pageNum: int = 1, pageSize: int = 5):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     # 同时获取分页数据和总数
     query = Category.filter(name__contains=name)
     # 获取分页数据

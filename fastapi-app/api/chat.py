@@ -9,8 +9,10 @@ from agents.agent import AgentUnavailableError
 from agents.factory import create_customer_service_agent
 from common.auth import get_current_user
 from common.exception_handler import CustomException
+from common.rate_limit import SlidingWindowRateLimiter
 from common.result import Result
 from models import Conversation, Message
+from settings import CHAT_RATE_LIMIT, CHAT_RATE_WINDOW_SECONDS
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", dependencies=[Depends(get_current_user)])
 
 customer_service_agent = create_customer_service_agent()
+
+# 每用户独立窗口：User/Admin 主键可能重叠，必须角色 + ID 联合标识
+send_rate_limiter = SlidingWindowRateLimiter(CHAT_RATE_LIMIT, CHAT_RATE_WINDOW_SECONDS)
 
 
 class MessageRequest(BaseModel):
@@ -89,6 +94,13 @@ async def get_messages(conversation_id: int, current_user: dict = Depends(get_cu
 
 @router.post("/send")
 async def send_message(data: MessageRequest, current_user: dict = Depends(get_current_user)):
+    # 限流先于任何持久化与 LLM 调用：被拒的请求不留 Message 记录
+    limiter_key = f"{current_user['role']}:{current_user['user_id']}"
+    if not send_rate_limiter.allow(limiter_key):
+        raise CustomException(
+            f"发送过于频繁，每 {CHAT_RATE_WINDOW_SECONDS} 秒最多 {CHAT_RATE_LIMIT} 条，请稍后再试"
+        )
+
     conversation = await _check_conversation_owner(data.conversation_id, current_user)
 
     await Message.create(

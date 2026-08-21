@@ -11,6 +11,15 @@ ORDER_CANCELLED = "已取消"
 CANCELLABLE_STATUSES = {ORDER_PENDING, ORDER_SHIPPED}
 
 
+def _order_total(order) -> object:
+    """成交价快照优先；旧单无快照时回退当前商品价（商品已删则为 0）。"""
+    if order.total_price is not None:
+        return order.total_price
+    if order.goods:
+        return order.goods.price * order.num
+    return 0
+
+
 async def get_order_status(user_id: int, order_id: int = None, order_no: str = None) -> str:
     if order_id or order_no:
         filters = {"id": order_id} if order_id else {"order_no": order_no}
@@ -22,7 +31,7 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
             f"- 商品：{order.goods.name if order.goods else '未知'}\n"
             f"- 数量：{order.num}\n"
             f"- 单价：¥{order.goods.price if order.goods else '未知'}\n"
-            f"- 总价：¥{order.goods.price * order.num if order.goods else 0}\n"
+            f"- 总价：¥{_order_total(order)}\n"
             f"- 收货地址：{order.address.address if order.address else '未知'}\n"
             f"- 下单时间：{order.time}\n"
             f"- 状态：{order.status or '待发货'}"
@@ -34,7 +43,7 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
     lines = [f"您最近的 {len(orders)} 笔订单："]
     for order in orders:
         goods_name = order.goods.name if order.goods else "未知"
-        total = order.goods.price * order.num if order.goods else 0
+        total = _order_total(order)
         status = order.status or "待发货"
         lines.append(f"- 订单号 {order.order_no or 'N/A'}：{goods_name} x{order.num}，¥{total}，{order.time}，{status}")
     return "\n".join(lines)

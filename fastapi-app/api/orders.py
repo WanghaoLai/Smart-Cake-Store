@@ -1,14 +1,16 @@
 from datetime import datetime
-import random
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
 from common.auth import get_current_user
 from common.exception_handler import CustomException
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Orders, Goods
 
@@ -52,6 +54,12 @@ OrdersCreatePydantic = create_model(
 )
 
 
+def _generate_order_no() -> str:
+    """秒级时间戳（可读、便于客服按时间定位）+ 6 位 hex 随机（同秒碰撞概率 ~6e-8）。
+    唯一性最终由 DB 唯一索引保证，生成端只需尽力降低碰撞。"""
+    return datetime.now().strftime('%Y%m%d%H%M%S') + uuid.uuid4().hex[:6].upper()
+
+
 @router.post("/add")
 async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depends(get_current_user)):
     if orders_pydantic.goods_id is None:
@@ -59,29 +67,38 @@ async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depend
     if orders_pydantic.num is None or orders_pydantic.num <= 0:
         raise CustomException("购买数量必须大于 0")
 
-    now = datetime.now()
-    order_no = now.strftime('%Y%m%d%H%M%S') + str(random.randint(1000, 9999))
-    time_str = now.strftime('%Y-%m-%d %H:%M:%S')
+    time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # 库存校验、订单写入、库存扣减必须在同一事务同一行锁内完成，否则并发超卖
-    async with in_transaction():
-        goods = await Goods.filter(id=orders_pydantic.goods_id).select_for_update().first()
-        if goods is None:
-            raise CustomException("商品不存在")
-        if goods.num < orders_pydantic.num:
-            raise CustomException(f"库存不足，剩余 {goods.num} {goods.unit or '个'}")
+    # 库存校验、订单写入、库存扣减必须在同一事务同一行锁内完成，否则并发超卖。
+    # 订单号撞上唯一索引（概率极低）时整体重试一次：换新号重新走完整事务，
+    # 重试包含库存扣减故不会二次扣减（上一轮事务已回滚）。
+    for _ in range(2):
+        try:
+            async with in_transaction():
+                goods = await Goods.filter(id=orders_pydantic.goods_id).select_for_update().first()
+                if goods is None:
+                    raise CustomException("商品不存在")
+                if goods.num < orders_pydantic.num:
+                    raise CustomException(f"库存不足，剩余 {goods.num} {goods.unit or '个'}")
 
-        await Orders.create(
-            user_id=current_user["user_id"],
-            goods_id=orders_pydantic.goods_id,
-            address_id=orders_pydantic.address_id,
-            num=orders_pydantic.num,
-            time=time_str,
-            order_no=order_no,
-            status=ORDER_PENDING,
-        )
-        goods.num -= orders_pydantic.num
-        await goods.save(update_fields=['num'])
+                await Orders.create(
+                    user_id=current_user["user_id"],
+                    goods_id=orders_pydantic.goods_id,
+                    address_id=orders_pydantic.address_id,
+                    num=orders_pydantic.num,
+                    time=time_str,
+                    order_no=_generate_order_no(),
+                    status=ORDER_PENDING,
+                    # 下单即锁定成交价，改价不影响历史订单
+                    total_price=goods.price * orders_pydantic.num,
+                )
+                goods.num -= orders_pydantic.num
+                await goods.save(update_fields=['num'])
+            break
+        except IntegrityError:
+            continue
+    else:
+        raise CustomException("订单号生成冲突，请重试")
 
     return Result.success()
 
@@ -144,6 +161,7 @@ async def update_status(id: int, status: str, current_user: dict = Depends(get_c
 async def select(goodsName: str = "", userId: int = 0, status: str = "",
                  pageNum: int = 1, pageSize: int = 5,
                  current_user: dict = Depends(get_current_user)):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     # 普通用户强制仅能查自己的订单，防止越权查询他人订单
     if current_user["role"] != "管理员":
         userId = current_user["user_id"]
@@ -166,7 +184,10 @@ async def select(goodsName: str = "", userId: int = 0, status: str = "",
             "goodsUnit": orders.goods.unit if orders.goods else None,
             "goodsImg": orders.goods.img if orders.goods else None,
             "goodsPrice": orders.goods.price if orders.goods else None,
-            "total": orders.goods.price * orders.num if orders.goods else None,
+            # 优先成交价快照；无快照且商品已删除的旧单回退当前价（历史兼容）
+            "total": orders.total_price
+            if orders.total_price is not None
+            else (orders.goods.price * orders.num if orders.goods else None),
             "aName": orders.address.name if orders.address else None,
             "aAddress": orders.address.address if orders.address else None,
             "aPhone": orders.address.phone if orders.address else None,

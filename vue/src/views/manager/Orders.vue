@@ -31,7 +31,7 @@
         <el-table-column label="商品" prop="goodsName" min-width="240">
           <template #default="scope">
             <div class="goods-cell">
-              <img v-if="scope.row.goodsImg" :src="scope.row.goodsImg" class="cell-img" alt="" />
+              <img v-if="scope.row.goodsImg" :src="$fileUrl(scope.row.goodsImg)" class="cell-img" alt="" />
               <div v-else class="cell-img placeholder"><el-icon><Picture /></el-icon></div>
               <div class="goods-info-cell">
                 <div class="goods-name-cell line1">{{ scope.row.goodsName }}</div>
@@ -109,7 +109,7 @@
       <el-form ref="reviewFormRef" :model="data.reviewForm" :rules="reviewRules" label-position="top">
         <el-form-item label="商品">
           <div class="review-goods">
-            <img :src="data.reviewForm.goodsImg" class="review-goods-img" v-if="data.reviewForm.goodsImg" />
+            <img :src="$fileUrl(data.reviewForm.goodsImg)" class="review-goods-img" v-if="data.reviewForm.goodsImg" />
             <div class="review-goods-info">
               <div class="review-goods-name line1">{{ data.reviewForm.goodsName }}</div>
               <div class="review-goods-meta">订单号 {{ data.reviewForm.orderNo || '—' }}</div>

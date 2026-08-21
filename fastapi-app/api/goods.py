@@ -7,6 +7,7 @@ from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.transactions import in_transaction
 
 from common.auth import get_current_user, get_current_admin
+from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Goods, IndexTask
 from agents.rag import index_task_service
@@ -27,12 +28,14 @@ GoodsCreatePydantic = create_model(
 
 
 async def _process_index_task_safe(task_id: int) -> None:
-    """BackgroundTasks 入口：吞掉异常防止任务栈污染。
-    失败时 IndexTask 表已记录 attempts/last_error，可由 /index/run-pending 兜底。"""
+    """BackgroundTasks 入口：异常不许逃逸污染任务栈，
+    但必须落日志——配置错误/代码 bug 这类非预期失败如果静默消失，
+    run-pending 兜底机制本身坏了也无从发现。可重试的索引失败仍由
+    IndexTask 表的 attempts/last_error 记录，/index/run-pending 兜底。"""
     try:
         await index_task_service.process(task_id)
     except Exception:
-        pass
+        logger.exception("index task %s 处理失败", task_id)
 
 
 @router.post("/add", dependencies=[Depends(get_current_admin)])
@@ -78,6 +81,7 @@ async def delete(goods_id: int, background_tasks: BackgroundTasks):
 
 @router.get("/selectPage")
 async def select(name: str = "", categoryId: int = 0, pageNum: int = 1, pageSize: int = 5):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     # 同时获取分页数据和总数
     query = Goods.filter(name__contains=name).prefetch_related('category') # 进行表关联
     if categoryId > 0:
