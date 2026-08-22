@@ -1,7 +1,9 @@
 """Stable application facade over the LangChain Agent runtime."""
 
 import logging
+import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -14,6 +16,20 @@ from .grounding import format_grounding_message
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AgentInvocation:
+    """单次 Agent 调用的可观测性快照（usage + latency + 失败标志）。
+
+    LangChain 不同 provider 返回的 usage_metadata 字段名不一致——
+    在此做缺省容错，调用方拿到的总是稳定的 4 字段结构。"""
+    answer: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    model: str = ""
+    latency_ms: int = 0
+    failed: bool = False
 
 
 class AgentRuntime(Protocol):
@@ -30,6 +46,26 @@ class AgentRuntime(Protocol):
 
 class AgentUnavailableError(RuntimeError):
     """Raised when the Agent cannot safely produce a user response."""
+
+
+def _extract_usage(message: BaseMessage) -> dict:
+    """从 LangChain AIMessage.usage_metadata 提取 token 用量（容错缺省）。
+
+    不同 provider 返回字段名略有差异（input_tokens/prompt_tokens 等），
+    LangChain 统一为 usage_metadata 的 input_tokens/output_tokens；
+    缺失则记 0，由调用方在看板标注缺失。"""
+    usage = getattr(message, "usage_metadata", None) or {}
+    response_metadata = getattr(message, "response_metadata", None) or {}
+    model_name = (
+        response_metadata.get("model_name")
+        or response_metadata.get("model")
+        or ""
+    )
+    return {
+        "prompt_tokens": int(usage.get("input_tokens", 0) or 0),
+        "completion_tokens": int(usage.get("output_tokens", 0) or 0),
+        "model": model_name,
+    }
 
 
 def _message_text(message: BaseMessage) -> str:
@@ -112,6 +148,18 @@ class CustomerServiceAgent:
         user_id: int | None = None,
         conversation_id: int | None = None,
     ) -> str:
+        return (await self.invoke(user_message, history, user_id, conversation_id)).answer
+
+    async def invoke(
+        self,
+        user_message: str,
+        history: list,
+        user_id: int | None = None,
+        conversation_id: int | None = None,
+    ) -> AgentInvocation:
+        """完整执行一次 Agent 调用，返回带 usage/latency 的快照。
+
+        process_message 是其 answer 字段的便捷包装，保留旧契约。"""
         if not self.configured:
             raise AgentUnavailableError("智能客服尚未配置模型凭据")
 
@@ -142,6 +190,7 @@ class CustomerServiceAgent:
             },
             "recursion_limit": max(10, self.profile.max_model_calls * 3),
         }
+        started = time.monotonic()
         try:
             result = await self.runtime.ainvoke(
                 {"messages": messages},
@@ -155,6 +204,7 @@ class CustomerServiceAgent:
             )
             raise AgentUnavailableError("智能客服执行失败") from exc
 
+        latency_ms = int((time.monotonic() - started) * 1000)
         output_messages = result.get("messages", [])
         tool_chain = _summarize_tool_chain(output_messages)
         final_message = output_messages[-1] if output_messages else None
@@ -173,11 +223,13 @@ class CustomerServiceAgent:
             )
             raise AgentUnavailableError("智能客服返回了空回答")
 
+        usage = _extract_usage(final_message)
         chain_names = " -> ".join(item["tool"] for item in tool_chain) or "none"
         logger.info(
-            "agent tool_chain conversation_id=%s user_id=%s grounding=%s chain_len=%d chain=%s answer_chars=%d",
+            "agent tool_chain conversation_id=%s user_id=%s grounding=%s chain_len=%d chain=%s answer_chars=%d tokens=%d/%d latency_ms=%d",
             conversation_id, user_id, ",".join(grounding_sources) or "none",
             len(tool_chain), chain_names, len(answer),
+            usage["prompt_tokens"], usage["completion_tokens"], latency_ms,
         )
         if tool_chain:
             logger.debug("agent tool_chain_detail conversation_id=%s detail=%s", conversation_id, tool_chain)
@@ -205,7 +257,13 @@ class CustomerServiceAgent:
                     conversation_id, user_id, exc,
                 )
                 raise AgentUnavailableError("商品信息校验失败") from exc
-        return answer
+        return AgentInvocation(
+            answer=answer,
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            model=usage["model"],
+            latency_ms=latency_ms,
+        )
 
     async def process_message_stream(
         self,
@@ -214,12 +272,13 @@ class CustomerServiceAgent:
         user_id: int | None = None,
         conversation_id: int | None = None,
     ) -> AsyncIterator[str]:
-        answer = await self.process_message(user_message, history, user_id, conversation_id)
-        for index in range(0, len(answer), 24):
-            yield answer[index:index + 24]
+        invocation = await self.invoke(user_message, history, user_id, conversation_id)
+        for index in range(0, len(invocation.answer), 24):
+            yield invocation.answer[index:index + 24]
 
 
 __all__ = [
+    "AgentInvocation",
     "AgentRuntime",
     "AgentUnavailableError",
     "CustomerServiceAgent",

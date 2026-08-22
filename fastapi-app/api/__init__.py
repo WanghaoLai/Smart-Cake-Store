@@ -18,6 +18,7 @@ from .health import router as health_router
 from .index import router as index_router
 from .knowledge import router as knowledge_router
 from .notice import router as notice_router
+from .ops import router as ops_router
 from .orders import router as orders_router
 from .region import router as region_router
 from .reviews import router as reviews_router
@@ -40,6 +41,7 @@ for router in (
     index_router,
     knowledge_router,
     notice_router,
+    ops_router,
     orders_router,
     region_router,
     reviews_router,

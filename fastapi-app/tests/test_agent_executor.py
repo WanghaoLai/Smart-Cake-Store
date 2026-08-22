@@ -12,15 +12,18 @@ from agents.agent import (
     ConversationMemory,
     CustomerServiceAgent,
 )
+from agents.agent.executor import AgentInvocation
 from agents.agent.grounding import GroundingEvidence
 from agents.config import AgentProfile
 
 
 class FakeAgentRuntime:
-    def __init__(self, answer="完成", result=None, error=None):
+    def __init__(self, answer="完成", result=None, error=None, usage=None, model="qwen-turbo"):
         self.answer = answer
         self.result = result
         self.error = error
+        self.usage = usage
+        self.model = model
         self.calls = []
 
     async def ainvoke(self, input_data, config=None, context=None):
@@ -29,7 +32,12 @@ class FakeAgentRuntime:
             raise self.error
         if self.result is not None:
             return self.result
-        return {"messages": [*input_data["messages"], AIMessage(content=self.answer)]}
+        msg = AIMessage(content=self.answer)
+        if self.usage is not None:
+            msg.usage_metadata = self.usage
+        if self.model is not None:
+            msg.response_metadata = {"model_name": self.model}
+        return {"messages": [*input_data["messages"], msg]}
 
 
 def make_executor(runtime=None, max_history=2, configured=True, grounding_service=None):
@@ -110,6 +118,30 @@ class CustomerServiceAgentTests(unittest.IsolatedAsyncioTestCase):
         executor = make_executor(FakeAgentRuntime(result={"messages": [HumanMessage(content="hello")]}))
         with self.assertRaisesRegex(AgentUnavailableError, "未返回有效回答"):
             await executor.process_message("hello", [])
+
+    async def test_usage_metadata_and_latency_are_captured_in_invocation(self):
+        runtime = FakeAgentRuntime(
+            "已完成",
+            usage={"input_tokens": 120, "output_tokens": 45},
+            model="qwen-turbo",
+        )
+        executor = make_executor(runtime)
+        invocation = await executor.invoke("now", [], user_id=7, conversation_id=11)
+        self.assertIsInstance(invocation, AgentInvocation)
+        self.assertEqual(invocation.answer, "已完成")
+        self.assertEqual(invocation.prompt_tokens, 120)
+        self.assertEqual(invocation.completion_tokens, 45)
+        self.assertEqual(invocation.model, "qwen-turbo")
+        self.assertGreaterEqual(invocation.latency_ms, 0)
+
+    async def test_missing_usage_metadata_defaults_to_zero(self):
+        # DashScope 某些模型不返回 usage_metadata：缺省记 0，不抛异常
+        runtime = FakeAgentRuntime("已完成", usage=None, model=None)
+        executor = make_executor(runtime)
+        invocation = await executor.invoke("hi", [])
+        self.assertEqual(invocation.prompt_tokens, 0)
+        self.assertEqual(invocation.completion_tokens, 0)
+        self.assertEqual(invocation.model, "")
 
     async def test_public_stream_contains_only_final_answer(self):
         answer = "这是一段超过二十四个字符的最终回答，用于验证对外输出不会包含内部工具调用。"

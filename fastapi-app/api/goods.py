@@ -11,6 +11,7 @@ from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from models import Goods, IndexTask
 from agents.rag import index_task_service
+from agents.recommendation import search
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,15 @@ async def select(name: str = "", categoryId: int = 0, pageNum: int = 1, pageSize
     # 封装分页数据
     pageinfo = PageInfo(total=total, list=goods_list)
     return Result.success(pageinfo)
+
+
+@router.get("/search")
+async def semantic_search(q: str = "", top_k: int = 10):
+    """语义搜索：自然语言描述直达商品（复用客服商品向量索引）。
+    三级兜底（向量 → 关键字 → 热销），mode 字段告知前端命中哪一级。"""
+    top_k = min(max(top_k, 1), 50)
+    data = await search(q, top_k)
+    return Result.success(data)
 
 
 @router.get("/detail/{goods_id}")

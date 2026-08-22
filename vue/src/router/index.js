@@ -26,6 +26,7 @@ const router = createRouter({
         { path: 'notice', component: () => import('@/views/manager/Notice.vue')},
         { path: 'chat', component: () => import('@/views/manager/Chat.vue')},
         { path: 'knowledge', component: () => import('@/views/manager/Knowledge.vue')},
+        { path: 'ops', component: () => import('@/views/manager/Ops.vue')},
         { path: 'favorite', component: () => import('@/views/manager/Favorite.vue')},
       ]
     },

@@ -114,13 +114,17 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
 
     async def generate():
         yield _sse({"type": "status", "status": "thinking", "message": "正在思考并查询相关信息…"})
+        usage = None
         try:
-            full_response = await customer_service_agent.process_message(
+            invocation = await customer_service_agent.invoke(
                 data.message,
                 history_list[:-1],
                 user_id=current_user["user_id"],
                 conversation_id=data.conversation_id,
             )
+            full_response = invocation.answer
+            usage = invocation
+            event_type = "message"
         except AgentUnavailableError:
             logger.exception(
                 "agent request failed: conversation_id=%s user_id=%s",
@@ -129,8 +133,6 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
             )
             full_response = "智能客服暂时不可用，请稍后重试或联系人工客服。"
             event_type = "error"
-        else:
-            event_type = "message"
 
         # Persist the complete result before emitting it so a disconnected browser
         # does not leave a user message without its corresponding assistant result.
@@ -138,6 +140,10 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
             conversation_id=data.conversation_id,
             role="assistant",
             content=full_response,
+            prompt_tokens=usage.prompt_tokens if usage else None,
+            completion_tokens=usage.completion_tokens if usage else None,
+            latency_ms=usage.latency_ms if usage else None,
+            model=usage.model or None if usage else None,
         )
         if conversation.title == "新对话":
             title = data.message[:20] + "..." if len(data.message) > 20 else data.message
