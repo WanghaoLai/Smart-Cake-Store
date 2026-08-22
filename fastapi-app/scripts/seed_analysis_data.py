@@ -12,18 +12,23 @@
 外键约束：订单/评价的用户、商品均取自现有表；一单仅一评（order_id 唯一约束）。
 状态一致性：被评价订单 status='已评价'（与 reviews.py 状态机一致）；已取消订单不计销量。
 
-用法：cd fastapi-app && python3 seed_analysis_data.py [--days 90] [--seed 42]
+用法：cd fastapi-app && python3 scripts/seed_analysis_data.py [--days 90] [--seed 42]
 注意：脚本追加写入，重复执行会叠加数据（换 --seed 可得不同分布）。"""
 import argparse
 import asyncio
 import random
+import sys
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+# 脚本位于 fastapi-app/scripts/，应用代码与 .env 在上级目录
+APP_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(APP_DIR))
+
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(APP_DIR / ".env")
 
 from tortoise import Tortoise
 

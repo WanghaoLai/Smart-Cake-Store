@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 
-# 异常检测系统 - 前后端一键启动脚本
+# smart-cake-store 前后端一键启动脚本
 #
 # 使用方法：
-#   1. macOS：在 Finder 中双击“一键启动.command”。
-#   2. 终端：在任意目录执行 /path/to/一键启动.command。
+#   1. macOS：在 Finder 中双击 start.command。
+#   2. 终端：在任意目录执行 /path/to/start.command。
 #   3. 停止：在脚本窗口按 Ctrl+C，将同时停止本脚本启动的前后端。
 #
 # 可选环境变量：
-#   BACKEND_PORT=9090 FRONTEND_PORT=5173 ./一键启动.command
-#   OPEN_BROWSER=0 ./一键启动.command  # 调试时不打开浏览器
+#   BACKEND_PORT=9090 FRONTEND_PORT=5173 ./start.command
+#   OPEN_BROWSER=0 ./start.command  # 调试时不打开浏览器
 
 set -u
 

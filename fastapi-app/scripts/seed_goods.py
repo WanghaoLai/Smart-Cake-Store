@@ -6,13 +6,18 @@
 - 中文字符串经过 Tortoise ORM（charset=utf8mb4），避开 mysql CLI 字符集陷阱
 - 文案风格：简短优雅命名 + 一句话描述 + 结构化详情 + 真实配料表
 
-用法：cd fastapi-app && python3 seed_goods.py
+用法：cd fastapi-app && python3 scripts/seed_goods.py
 """
 import asyncio
+import sys
 from pathlib import Path
 
+# 脚本位于 fastapi-app/scripts/，应用代码与 .env 在上级目录
+APP_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(APP_DIR))
+
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(APP_DIR / ".env")
 
 from tortoise import Tortoise
 from settings import TORTOISE_ORM

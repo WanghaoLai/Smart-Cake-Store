@@ -117,10 +117,10 @@ Desktop.ini
 .ipynb_checkpoints/
 
 # ============================================================
-# 本地规划 / 审查文档（个人工作产物，不入库）
-# 注意：项目整体架构.txt 与 README.md 是入库文档，绝不可加进本段
+# 本地归档文档（个人工作产物，不入库）
+# 注意：docs/ 下其余文档（architecture/code-review/roadmap）入库，
+# README 与 db/README.md 会链接到它们，绝不可加进本段
 # ============================================================
-/AI_Agent生产化升级阶段性开发计划.docx
-/智能商城导购与运营平台-完整开发方案.md
-/代码审查报告.md
-/系统架构与AI功能升级改进计划.md
+/docs/archive/
+/docs/code-review.md
+/docs/roadmap.md
