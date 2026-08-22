@@ -105,7 +105,7 @@ API 鉴权 → Grounding 确定性取证（MySQL + ChromaDB）
 | Python | ≥ 3.10 | 后端运行时 |
 | Node.js | ≥ 18（含 npm） | 前端构建 |
 | MySQL | ≥ 8.0 | 字符集 utf8mb4 |
-| mysql 客户端 | 任意近期版本 | `migrate.sh` 依赖；macOS 默认不在 PATH 时用 `MYSQL_BIN` 指定 |
+| mysql 客户端 | 任意近期版本 | `db/migrate.sh` 依赖；macOS 默认不在 PATH 时用 `MYSQL_BIN` 指定 |
 | DashScope API Key | 可选 | 智能客服与 AI 运营分析必需；商城交易、搜索、确定性分析不依赖它 |
 
 ## 快速开始
@@ -120,31 +120,33 @@ git clone <仓库地址> && cd samrt_cake_store
 cp fastapi-app/.env.example fastapi-app/.env
 #    编辑 fastapi-app/.env，至少填写 DB_PASSWORD 和 JWT_SECRET_KEY
 
-# 3. 初始化数据库（幂等：自动建库导数据、执行增量迁移）
-./migrate.sh
+# 3. 初始化数据库（幂等：自动建库 + 基础 schema + 种子数据 + 增量迁移）
+./db/migrate.sh
 
 # 4. 安装依赖
 python3 -m venv fastapi-app/.venv && fastapi-app/.venv/bin/pip install -r fastapi-app/requirements.txt
 cd vue && npm install && cd ..
 
 # 5. 一键启动前后端（macOS 可直接双击该脚本）
-./一键启动.command
+./start.command
 ```
 
-启动成功后脚本会自动打开浏览器。用以下演示账号登录（首次登录会自动把明文密码升级为 bcrypt 哈希）：
+启动成功后脚本会自动打开浏览器。用以下演示账号登录（由 `seed_base.sql` 预置，密码已为 bcrypt 哈希）：
 
 | 角色 | 用户名 | 密码 |
 |------|--------|------|
 | 管理员 | `222` | `222` |
 | 用户 | `234` | `234` |
 
-> 没有账号也可以在登录页点击注册，创建用户角色账号。种子数据中的 `admin` 账号密码为哈希值，仓库内无明文记录。
+> 没有账号也可以在登录页点击注册，创建用户角色账号。
 >
 > **默认密码策略**：管理员在后台新建用户/管理员且不填密码时，默认密码为 `123`（管理员为 `admin`）。该账号会被标记 `must_change_password=True`，首次登录强制跳转改密页，不改密无法使用系统——上线前请确认此闭环未被移除，或改为随机密码一次性下发给使用者。
+>
+> 全新库默认没有商品数据（图片文件不入 Git），需要演示商品时执行：`cd fastapi-app && python3 scripts/seed_goods.py`。
 
 一键启动脚本默认后端 `127.0.0.1:9090`、前端 `127.0.0.1:5173`，端口被占用时自动顺延；日志写入 `logs/startup_<时间戳>/`（`logs/latest` 软链接指向最近一次）。按 `Ctrl+C` 同时停止前后端。
 
-> 想体验 AI 运营分析页的完整效果，可以填充演示数据：`cd fastapi-app && python3 seed_analysis_data.py`（在现有库上补充 90 天订单/评价，覆盖热销/滞销/差评聚焦/库存四档等场景，详见脚本头部注释）。
+> 想体验 AI 运营分析页的完整效果，可以填充演示数据：`cd fastapi-app && python3 scripts/seed_analysis_data.py`（在现有库上补充 90 天订单/评价，覆盖热销/滞销/差评聚焦/库存四档等场景，详见脚本头部注释）。
 
 ### 手动启动（分步）
 
@@ -222,10 +224,13 @@ curl -s -X POST $BASE/ops/analysis/ai \
 
 ```
 samrt_cake_store/
-├── 一键启动.command              # 前后端一键启动（端口探测、日志、自动开浏览器）
-├── migrate.sh                    # 幂等数据库迁移执行器
-├── cake_store.sql                # 基础 schema + 种子数据（全量 dump）
-├── migrations/                   # 增量迁移 001–009（附 README 说明执行规则）
+├── start.command                 # 前后端一键启动（端口探测、日志、自动开浏览器）
+├── docs/                         # 项目文档（架构说明、审查报告、改进路线图）
+├── db/                           # 数据库唯一入口（详见 db/README.md）
+│   ├── migrate.sh                # 幂等迁移执行器（自动建库 + schema + 种子 + 增量）
+│   ├── cake_store.sql            # 基础 schema（纯 DDL；001–009 已预标记）
+│   ├── seed_base.sql             # 基础种子：演示账号(bcrypt) + 区划 + 分类公告
+│   └── migrations/               # 增量迁移 001–009 + archive/ 历史留档
 ├── logs/                         # 启动日志（运行时生成，不入库）
 │
 ├── fastapi-app/                  # 后端
@@ -234,6 +239,7 @@ samrt_cake_store/
 │   ├── models.py                 # Tortoise ORM 业务模型
 │   ├── .env.example              # 环境变量模板
 │   ├── seed_analysis_data.py     # 运营分析页演示数据填充脚本（可选）
+│   ├── scripts/                  # 数据填充脚本（seed_goods / seed_analysis_data）
 │   ├── api/                      # 18 个 HTTP 路由模块（只做鉴权与协议）
 │   ├── agents/                   # AI 编排层（唯一智能模块）
 │   │   ├── config/               # Agent profile：customer_service.json + ops_assistant.json
@@ -248,7 +254,7 @@ samrt_cake_store/
 │   ├── common/                   # JWT、密码、统一响应、异常、分页 clamp、限流
 │   ├── tests/                    # 72 个回归测试（Agent/工具/API/架构约束/业务规则）
 │   ├── chroma_db/                # 向量索引（可重建，不入库）
-│   └── files/                    # 上传文件（不入库）
+│   └── files/                    # 上传文件（goods/avatar 种子图入库分发；review 运行时不入库）
 │
 └── vue/                          # 前端（单一 SPA，商城与管理后台共用）
     ├── vite.config.js            # Vite + Element Plus 按需引入
@@ -260,7 +266,7 @@ samrt_cake_store/
 
 ## 数据库与迁移
 
-`migrate.sh` 的工作流：读取 `fastapi-app/.env` 连接信息 → 若 `orders` 表不存在则导入 `cake_store.sql` → 按文件名升序执行 `migrations/*.sql`，已应用的自动跳过。全程强制 utf8mb4，可安全重跑。
+`db/migrate.sh` 的工作流：读取 `fastapi-app/.env` 连接信息（命令行环境变量优先，如 `DB_NAME=xxx` 可临时切库）→ 目标库不存在时自动创建 → 若 `orders` 表不存在则依次导入 `db/cake_store.sql`（基础 schema，001–009 已预标记不会重放）和 `db/seed_base.sql`（演示账号/区划/分类/公告，幂等）→ 按文件名升序执行 `db/migrations/*.sql`，已应用的自动跳过。全程强制 utf8mb4，可安全重跑。详见 [db/README.md](db/README.md)。
 
 ### 数据表一览
 
@@ -280,17 +286,17 @@ samrt_cake_store/
 | `knowledge` | Knowledge | RAG 知识文档元数据；文档内容向量化存于 ChromaDB，原文不落盘 |
 | `index_task` | IndexTask | 商品 → 向量索引同步 outbox；业务事务只写本表，后台异步同步 ChromaDB，失败重试 3 次 |
 | `ops_report` | OpsReport | 运营报告落库（经营日报 + 商品分析报告，`facts.kind` 区分），供历史回看与 Markdown 下载 |
-| `_schema_migrations` | — | `migrate.sh` 的迁移执行记录；基础 dump 已预置 001–003，全新部署导入后自动跳过对应迁移 |
+| `_schema_migrations` | — | `migrate.sh` 的迁移执行记录；基础 dump 已预标记 001–009，全新部署导入后自动跳过对应迁移 |
 
-种子数据说明：初始公告已使用「智能商城导购与运营平台」名称；演示账号 `222`/`234` 为明文密码，首次登录自动升级为 bcrypt 哈希。
+种子数据说明（`seed_base.sql`，全部 `INSERT IGNORE` 幂等）：演示账号 `222`/`234` 以 bcrypt 哈希预置；省市区三级区划 3380 行（地址级联依赖）；7 个商品分类与初始公告。**真实业务数据（地址、聊天、订单）不出现在仓库中**——商品与运营演示数据分别由 `seed_goods.py`、`seed_analysis_data.py` 按需生成。
 
 新增表结构变更时：
 
-1. 在 `migrations/` 下新建 `NNN_描述.sql`（编号递增），只写增量 DDL。
-2. 本地执行 `./migrate.sh` 验证。
-3. 不要手动修改 `cake_store.sql`——它包含 `DROP TABLE`，对已有数据手工重跑会清库（执行器已内置防重入保护）。
+1. 在 `db/migrations/` 下新建 `NNN_描述.sql`（编号递增，当前下一个是 `010`），只写增量 DDL。
+2. 本地执行 `./db/migrate.sh` 验证。
+3. 不要手动修改 `db/cake_store.sql`——它包含 `DROP TABLE`，对已有数据手工重跑会清库（执行器已内置防重入保护）。
 
-迁移设计细节见 [migrations/README.md](migrations/README.md)。
+迁移与基线合并的设计细节见 [db/README.md](db/README.md)。
 
 ## 配置参考
 
@@ -340,20 +346,20 @@ cd vue && npm run build
 
 | 文档 | 内容 |
 |------|------|
-| [项目整体架构.txt](项目整体架构.txt) | 文件架构、依赖方向与验证命令（注意：以代码为准） |
-| [代码审查报告.md](代码审查报告.md) | 21 项审查发现的完整记录与逐项修复说明 |
-| [系统架构与AI功能升级改进计划.md](系统架构与AI功能升级改进计划.md) | 架构评审结论、P0–P2 改进路线图（P0 三项已实施） |
-| [migrations/README.md](migrations/README.md) | 迁移文件结构与执行规则 |
+| [docs/architecture.md](docs/architecture.md) | 文件架构、依赖方向与验证命令（注意：以代码为准） |
+| [docs/code-review.md](docs/code-review.md) | 21 项审查发现的完整记录与逐项修复说明 |
+| [docs/roadmap.md](docs/roadmap.md) | 架构评审结论、P0–P2 改进路线图（P0 三项已实施） |
+| [db/README.md](db/README.md) | 数据库目录使用说明：迁移执行、新增迁移、基线合并、种子脚本 |
 | [fastapi-app/.env.example](fastapi-app/.env.example) | 全部环境变量及注释 |
 
 ## 参与贡献
 
 1. 从 `main` 拉出特性分支开发（`git checkout -b feat/xxx`）。
-2. 改动后端时运行 `PYTHONPATH=fastapi-app python3 -m unittest discover -s fastapi-app/tests -v`，全部通过再提交；涉及表结构的变更必须附带 `migrations/NNN_*.sql` 增量迁移。
+2. 改动后端时运行 `PYTHONPATH=fastapi-app python3 -m unittest discover -s fastapi-app/tests -v`，全部通过再提交；涉及表结构的变更必须附带 `db/migrations/NNN_*.sql` 增量迁移。
 3. 新增或修改 Agent 行为时，同步更新 `agents/config/*.json` 提示词并保证架构测试（提示词需覆盖全部白名单工具）通过。
 4. 提交信息使用中文祈使句概述变更，例如"修复智能助手工具调用失败的问题"。
 5. 不要提交 `.env`、`chroma_db/`、`files/`、`node_modules/`、`dist/`（`.gitignore` 已覆盖，克隆后按快速开始重建）。
-6. 架构约束（路由注册方式、agents 目录依赖方向）由测试强制，重构前先阅读 [项目整体架构.txt](项目整体架构.txt) 中的"禁止事项"。
+6. 架构约束（路由注册方式、agents 目录依赖方向）由测试强制，重构前先阅读 [docs/architecture.md](docs/architecture.md) 中的"禁止事项"。
 
 ## 许可证
 
