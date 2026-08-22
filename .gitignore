@@ -12,8 +12,8 @@
 !**/.env.example
 
 # vue 环境配置：含部署地址，按本地文件管理不入库
-vue/.env.development
-vue/.env.production
+#vue/.env.development
+#vue/.env.production
 
 # ============================================================
 # Python
