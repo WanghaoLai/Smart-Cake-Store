@@ -36,6 +36,7 @@
       <el-button round @click="reset">重置</el-button>
       <div class="toolbar-right">
         <span class="result-count">共 <b>{{ data.total }}</b> 款</span>
+        <span v-if="data.semanticMode" class="semantic-hint">{{ data.semanticHint }}</span>
       </div>
     </div>
 
@@ -166,6 +167,10 @@ const data = reactive({
   form: {},
   formVisible: false,
   name: route.query.name || null,
+  // 语义搜索：当用户输入自然语言描述（超过单纯商品名匹配长度）时可切换
+  // 到 /goods/search，命中向量召回 + 三级兜底
+  semanticMode: false,
+  semanticHint: '',
   categoryId: 0,
   categoryList: [],
   pageNum: 1,
@@ -253,6 +258,15 @@ const reserveInit = (goodsId) => {
 }
 
 const load = () => {
+  // 切换到语义搜索路径：用户输入偏自然语言（≥ 4 字且包含中文/空格）时
+  // 走向量召回；分类筛选或短词仍走传统 LIKE 分页（避免误命中向量兜底）
+  const q = (data.name || '').trim()
+  const looksNatural = q.length >= 4 && /[一-龥\s]/.test(q)
+  if (looksNatural && data.categoryId === 0) {
+    return semanticSearch(q)
+  }
+  data.semanticMode = false
+  data.semanticHint = ''
   request.get('/goods/selectPage', {
     params: {
       pageNum: data.pageNum,
@@ -266,6 +280,23 @@ const load = () => {
       data.total = res.data?.total || 0
     } else { ElMessage.error(res.msg) }
   })
+}
+
+const semanticSearch = (q) => {
+  request.get('/goods/search', { params: { q, top_k: data.pageSize } })
+    .then(res => {
+      if (res.code === '200') {
+        data.semanticMode = true
+        const mode = res.data?.mode
+        data.tableData = res.data?.list || []
+        data.total = data.tableData.length
+        data.semanticHint = mode === 'semantic' ? '按语义匹配排序'
+          : mode === 'keyword' ? '未找到语义匹配，按关键词回退'
+          : '未找到匹配，为你推荐热销商品'
+      } else {
+        ElMessage.error(res.msg)
+      }
+    })
 }
 
 const save = () => {
@@ -415,6 +446,15 @@ watch(() => route.query.name, (n) => {
 .result-count b {
   color: var(--c-primary);
   font-size: 15px;
+}
+
+.semantic-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  background: var(--c-bg-card);
+  padding: 2px 8px;
+  border-radius: 10px;
 }
 
 /* —— 商品卡片网格 —— */

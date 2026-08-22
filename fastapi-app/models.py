@@ -176,6 +176,11 @@ class Message(Model):
     conversation = fields.ForeignKeyField('models.Conversation', related_name='messages')
     role = fields.CharField(max_length=20)  # 'user' 或 'assistant'
     content = fields.TextField()
+    # AI 可观测性：LLM 调用计量与归因（仅 assistant 消息有值；缺失记 NULL）
+    prompt_tokens = fields.IntField(null=True)
+    completion_tokens = fields.IntField(null=True)
+    latency_ms = fields.IntField(null=True)
+    model = fields.CharField(max_length=64, null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:
@@ -219,6 +224,19 @@ class IndexTask(Model):
 
     class Meta:
         table = 'index_task'
+
+
+class OpsReport(Model):
+    """运营日报：每次生成落库，事实+LLM摘要并列，历史可回看。"""
+    id = fields.IntField(pk=True, null=False)
+    days = fields.IntField(default=7)
+    summary = fields.TextField(null=True)  # LLM 摘要（失败时 NULL）
+    facts = fields.JSONField(null=True)    # 原始 SQL 事实快照
+    model = fields.CharField(max_length=64, null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'ops_report'
 
 
 

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from tortoise.functions import Sum
 
+from agents.recommendation import recommend
 from api.orders import ORDER_CANCELLED, ORDER_PENDING, ORDER_SHIPPED
-from common.auth import get_current_user
+from common.auth import get_current_user, get_current_admin
 from common.result import Result
 from models import Goods, Orders, Notice, Favorite
 
@@ -70,16 +71,8 @@ async def home_stats(current_user: dict = Depends(get_current_user)):
     pending = await Orders.filter(user_id=user_id, status__in=[ORDER_PENDING, ORDER_SHIPPED]).count()
     # 累计消费：数据库聚合，排除已取消
     spent = await _sum_revenue(user_id=user_id)
-    # 推荐：取库存 > 0 的前 4 件最新商品
-    recommend_qs = await Goods.filter(num__gt=0).order_by("-id").limit(4).prefetch_related("category")
-    recommends = [
-        {
-            "id": g.id, "name": g.name, "img": g.img, "price": g.price,
-            "unit": g.unit, "description": g.description,
-            "categoryName": g.category.name if g.category else None,
-        }
-        for g in recommend_qs
-    ]
+    # 推荐：个性化规则引擎（收藏/购买/评分/热度多信号），替代"最新上架"
+    recommends = await recommend(user_id, limit=4)
     # 公告
     notices = await Notice.all().order_by("-id").limit(4)
     return Result.success({

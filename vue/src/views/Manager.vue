@@ -176,6 +176,18 @@
             <template #title>知识库管理</template>
           </el-menu-item>
 
+          <!-- 管理员：数据分析 -->
+          <el-sub-menu index="ai-ops" v-if="data.user.role === '管理员'">
+            <template #title>
+              <el-icon><DataAnalysis /></el-icon>
+              <span>数据分析</span>
+            </template>
+            <el-menu-item index="/manager/ops">
+              <el-icon><TrendCharts /></el-icon>
+              <template #title>商品分析</template>
+            </el-menu-item>
+          </el-sub-menu>
+
           <!-- 通用 -->
           <el-menu-item index="/manager/address" v-if="data.user.role === '管理员'">
             <el-icon><Location /></el-icon>
@@ -216,6 +228,7 @@ import {
   SwitchButton, Cherry, Grid, Coin, Refrigerator, Avatar, Position, SoldOut,
   Location, Monitor, Document, Star, ChatLineSquare,
   Sunset, Present, GobletSquare, MagicStick, Watch, Medal, Trophy,
+  DataAnalysis, TrendCharts,
 } from "@element-plus/icons-vue";
 import request from "@/utils/request";
 
@@ -318,16 +331,18 @@ const handleSearch = () => {
 
 <style scoped>
 .app-shell {
-  min-height: 100vh;
+  /* 固定视口高度并锁定滚动：header/侧栏天然固定，滚动只发生在内容区 */
+  height: 100vh;
+  height: 100dvh; /* 移动端地址栏收起/展开时的动态视口 */
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--c-bg-page);
 }
 
 /* ========== 顶部导航 ========== */
 .app-header {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 100;
   height: var(--header-h);
   background: var(--c-bg-card);
@@ -484,7 +499,8 @@ const handleSearch = () => {
 .app-body {
   flex: 1;
   display: flex;
-  min-height: 0;
+  min-height: 0; /* flex 子项允许收缩，内容区滚动的前提 */
+  overflow: hidden;
 }
 
 .app-sidebar {
@@ -494,6 +510,8 @@ const handleSearch = () => {
   transition: width var(--t-base) var(--ease-out);
   overflow: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-sidebar.collapsed {
@@ -503,8 +521,9 @@ const handleSearch = () => {
 .sidebar-menu {
   border-right: none !important;
   padding: 12px 10px;
-  height: calc(100vh - var(--header-h));
-  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto; /* 菜单过长时侧栏内部滚动，不影响内容区 */
   overflow-x: hidden;
 }
 
@@ -553,7 +572,10 @@ const handleSearch = () => {
 /* ========== 内容区 ========== */
 .app-content {
   flex: 1;
-  min-width: 0;
+  min-width: 0;          /* 允许窄于内容宽度，防止表格撑破 */
+  min-height: 0;
+  overflow-y: auto;      /* 全站唯一主滚动容器：子页面在此内部滚动 */
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -575,6 +597,11 @@ const handleSearch = () => {
 @media (max-width: 768px) {
   .header-center { display: none; }
   .user-meta { display: none; }
-  .app-sidebar { position: fixed; z-index: 99; height: calc(100vh - var(--header-h)); }
+  .app-sidebar {
+    position: fixed;
+    z-index: 99;
+    top: var(--header-h);
+    height: calc(100dvh - var(--header-h));
+  }
 }
 </style>

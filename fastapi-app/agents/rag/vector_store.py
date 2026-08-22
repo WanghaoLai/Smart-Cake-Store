@@ -217,6 +217,23 @@ class KnowledgeService:
         """仅检索商品向量库"""
         return self._query_collection(self.goods_collection, query, top_k, "goods_base")
 
+    def search_goods_with_ids(self, query: str, top_k: int = 20) -> list:
+        """检索商品向量库并返回 goods_id（商城语义搜索用）。
+
+        与 search_goods 的差异：metadata 里的 goods_id 是回查 MySQL 的键，
+        不能丢；distance 越小越相似（Chroma L2）。"""
+        query_embedding = self._get_embeddings([query])
+        results = self.goods_collection.query(query_embeddings=query_embedding, n_results=top_k)
+        candidates = []
+        if results.get("metadatas") and results["metadatas"][0]:
+            for i, meta in enumerate(results["metadatas"][0]):
+                goods_id = meta.get("goods_id")
+                if goods_id is None:
+                    continue
+                distance = float(results["distances"][0][i]) if results.get("distances") else 0.0
+                candidates.append({"goods_id": int(goods_id), "distance": distance})
+        return candidates
+
     def search(self, query: str, top_k: int = 3) -> list:
         """同时检索文档知识库和商品向量库，合并返回"""
         doc_results = self.search_documents(query, top_k)

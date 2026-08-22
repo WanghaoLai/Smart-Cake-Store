@@ -1,6 +1,7 @@
 """Application-level Agent components and execution facade."""
 
 from .executor import (
+    AgentInvocation,
     AgentRuntime,
     AgentUnavailableError,
     CustomerServiceAgent,
@@ -12,6 +13,7 @@ __all__ = [
     "AgentComponents",
     "AgentContext",
     "AgentHarness",
+    "AgentInvocation",
     "AgentRuntime",
     "AgentUnavailableError",
     "ConversationMemory",

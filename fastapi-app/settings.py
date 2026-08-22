@@ -67,6 +67,21 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 CHAT_RATE_LIMIT = int(os.getenv("CHAT_RATE_LIMIT", "20"))
 CHAT_RATE_WINDOW_SECONDS = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
 
+# ---- 语义搜索 / 个性化推荐（纯规则，无 LLM）----
+# heat_weight：热度对向量相似分的加成幅度（0 = 纯语义排序），可线上调参
+SEMANTIC_SEARCH_CONFIG = {
+    "candidate_k": int(os.getenv("SEARCH_CANDIDATE_K", "20")),
+    "default_top_k": int(os.getenv("SEARCH_TOP_K", "10")),
+    "heat_weight": float(os.getenv("SEARCH_HEAT_WEIGHT", "0.15")),
+}
+# 信号权重：收藏分类 > 购买分类 > 平均评分 > 销量热度
+RECOMMEND_WEIGHTS = {
+    "favorite_category": float(os.getenv("RECOMMEND_W_FAVORITE", "3.0")),
+    "purchase_category": float(os.getenv("RECOMMEND_W_PURCHASE", "2.0")),
+    "rating": float(os.getenv("RECOMMEND_W_RATING", "1.0")),
+    "sales": float(os.getenv("RECOMMEND_W_SALES", "0.5")),
+}
+
 AI_CONFIG = {
     "dashscope_api_key": DASHSCOPE_API_KEY,
     "model": os.getenv("LLM_MODEL", "qwen-turbo"),
