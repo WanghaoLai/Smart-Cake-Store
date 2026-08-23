@@ -29,8 +29,8 @@ CREATE TABLE `_schema_migrations` (
 
 -- ----------------------------
 -- Records of _schema_migrations
--- 基线说明：本 dump 已包含 001–009 全部结构变更（2026-08-22 重新导出）。
--- 预标记这九个迁移为已应用，防止全新导入后 migrate.sh 重放导致
+-- 基线说明：本 dump 已包含 001–011 全部结构变更（2026-08-23 更新）。
+-- 预标记这些迁移为已应用，防止全新导入后 migrate.sh 重放导致
 -- "duplicate column" 类错误；存量库的记录与本标记天然一致。
 -- ----------------------------
 BEGIN;
@@ -43,6 +43,8 @@ INSERT INTO `_schema_migrations` (`filename`) VALUES ('006_orders_total_price.sq
 INSERT INTO `_schema_migrations` (`filename`) VALUES ('007_file_url_relative.sql');
 INSERT INTO `_schema_migrations` (`filename`) VALUES ('008_message_usage.sql');
 INSERT INTO `_schema_migrations` (`filename`) VALUES ('009_ops_report.sql');
+INSERT INTO `_schema_migrations` (`filename`) VALUES ('010_security_integrity.sql');
+INSERT INTO `_schema_migrations` (`filename`) VALUES ('011_review_recommendations.sql');
 COMMIT;
 
 -- ----------------------------
@@ -63,10 +65,12 @@ CREATE TABLE `address` (
   `town_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '区县名称',
   `detail` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '详细地址',
   `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否默认地址',
+  `default_user_id` int GENERATED ALWAYS AS (CASE WHEN `is_default` = 1 THEN `user_id` ELSE NULL END) STORED,
   PRIMARY KEY (`id`),
   KEY `idx_address_user` (`user_id`),
   KEY `idx_address_region` (`province_id`,`city_id`,`town_id`),
-  KEY `idx_address_user_default` (`user_id`,`is_default`)
+  KEY `idx_address_user_default` (`user_id`,`is_default`),
+  UNIQUE KEY `uk_address_one_default` (`default_user_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='地址信息';
 
 -- ----------------------------
@@ -77,10 +81,11 @@ CREATE TABLE `admin` (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `username` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '账号',
   `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '密码',
-  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '名称',
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '名称',
   `avatar` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '头像',
   `role` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色',
   `must_change_password` tinyint(1) NOT NULL DEFAULT '1',
+  `token_version` int NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `username` (`username`) USING BTREE
 ) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC COMMENT='管理员信息';
@@ -145,6 +150,7 @@ CREATE TABLE `favorite` (
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`),
   KEY `goods_id` (`goods_id`),
+  UNIQUE KEY `uk_favorite_user_goods` (`user_id`,`goods_id`),
   CONSTRAINT `favorite_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`),
   CONSTRAINT `favorite_ibfk_2` FOREIGN KEY (`goods_id`) REFERENCES `goods` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -165,11 +171,14 @@ CREATE TABLE `goods` (
   `origin` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `serves` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `img` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '图片',
-  `price` decimal(10,2) DEFAULT NULL,
-  `num` int DEFAULT NULL COMMENT '库存',
+  `price` decimal(10,2) NOT NULL,
+  `num` int NOT NULL COMMENT '库存',
   `unit` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '单位',
   `category_id` int DEFAULT NULL COMMENT '分类ID',
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_goods_category` (`category_id`),
+  CONSTRAINT `ck_goods_price_nonnegative` CHECK (`price` >= 0),
+  CONSTRAINT `ck_goods_stock_nonnegative` CHECK (`num` >= 0)
 ) ENGINE=InnoDB AUTO_INCREMENT=148 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='蛋糕信息';
 
 -- ----------------------------
@@ -184,9 +193,12 @@ CREATE TABLE `index_task` (
   `status` varchar(16) NOT NULL DEFAULT 'pending',
   `attempts` int NOT NULL DEFAULT '0',
   `last_error` longtext,
+  `claim_token` varchar(36) DEFAULT NULL,
+  `processing_started_at` datetime(6) DEFAULT NULL,
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_index_task_claim` (`status`,`processing_started_at`,`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=19 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='向量索引 outbox：MySQL 业务提交后写入，后台任务异步同步到 ChromaDB。';
 
 -- ----------------------------
@@ -230,7 +242,7 @@ CREATE TABLE `notice` (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '标题',
   `content` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '内容',
-  `time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '时间',
+  `time` datetime(6) NOT NULL COMMENT 'UTC 时间；展示时转换为门店时区',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='公告信息';
 
@@ -260,11 +272,17 @@ CREATE TABLE `orders` (
   `user_id` int DEFAULT NULL COMMENT '用户ID',
   `goods_id` int DEFAULT NULL COMMENT '商品ID',
   `address_id` int DEFAULT NULL COMMENT '地址ID',
-  `time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '下单时间',
+  `time` datetime(6) NOT NULL COMMENT 'UTC 下单时间',
   `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT '待发货' COMMENT '订单状态：待发货（默认）/ 已发货 / 待评价 / 已评价 / 已取消',
   `total_price` decimal(10,2) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_orders_order_no` (`order_no`)
+  UNIQUE KEY `uk_orders_order_no` (`order_no`),
+  KEY `idx_orders_user_id_id` (`user_id`,`id`),
+  KEY `idx_orders_goods_time` (`goods_id`,`time`),
+  KEY `idx_orders_status_time` (`status`,`time`),
+  KEY `idx_orders_address` (`address_id`),
+  CONSTRAINT `ck_orders_num_positive` CHECK (`num` IS NULL OR `num` > 0),
+  CONSTRAINT `ck_orders_total_nonnegative` CHECK (`total_price` IS NULL OR `total_price` >= 0)
 ) ENGINE=InnoDB AUTO_INCREMENT=478 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单信息';
 
 -- ----------------------------
@@ -280,12 +298,13 @@ CREATE TABLE `review` (
   `content` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '评价正文',
   `images` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '评价图片 URL JSON 数组',
   `reply` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '管理员回复',
-  `reply_time` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '回复时间',
-  `time` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '评价时间',
+  `reply_time` datetime(6) DEFAULT NULL COMMENT 'UTC 回复时间',
+  `time` datetime(6) NOT NULL COMMENT 'UTC 评价时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order` (`order_id`),
   KEY `idx_goods` (`goods_id`),
-  KEY `idx_user` (`user_id`)
+  KEY `idx_user` (`user_id`),
+  CONSTRAINT `ck_review_rating` CHECK (`rating` IS NULL OR (`rating` >= 1 AND `rating` <= 5))
 ) ENGINE=InnoDB AUTO_INCREMENT=291 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品评价';
 
 -- ----------------------------
@@ -338,7 +357,29 @@ CREATE TABLE `user` (
   `avatar` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '头像',
   `role` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '角色',
   `must_change_password` tinyint(1) NOT NULL DEFAULT '1',
-  PRIMARY KEY (`id`)
+  `token_version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_username` (`username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户信息';
+
+-- 审计型业务关系统一在所有表建立后添加，避免基线中的建表顺序影响外键创建。
+ALTER TABLE `address`
+  ADD CONSTRAINT `fk_address_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_address_province` FOREIGN KEY (`province_id`) REFERENCES `tb_province` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_address_city` FOREIGN KEY (`city_id`) REFERENCES `tb_city` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_address_town` FOREIGN KEY (`town_id`) REFERENCES `tb_town` (`id`) ON DELETE RESTRICT;
+
+ALTER TABLE `goods`
+  ADD CONSTRAINT `fk_goods_category` FOREIGN KEY (`category_id`) REFERENCES `category` (`id`) ON DELETE SET NULL;
+
+ALTER TABLE `orders`
+  ADD CONSTRAINT `fk_orders_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_orders_goods` FOREIGN KEY (`goods_id`) REFERENCES `goods` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_orders_address` FOREIGN KEY (`address_id`) REFERENCES `address` (`id`) ON DELETE RESTRICT;
+
+ALTER TABLE `review`
+  ADD CONSTRAINT `fk_review_goods` FOREIGN KEY (`goods_id`) REFERENCES `goods` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_review_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE RESTRICT,
+  ADD CONSTRAINT `fk_review_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -8,6 +7,7 @@ from tortoise.contrib.pydantic import pydantic_model_creator
 from common.auth import get_current_user, get_current_admin
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
+from common.time import format_store_time, utc_now
 from models import Notice
 
 router = APIRouter(prefix="/notice")
@@ -25,10 +25,16 @@ NoticeCreatePydantic = create_model(
 )
 
 
+def _notice_to_dict(notice) -> dict:
+    data = NoticePydantic.model_validate(notice).model_dump()
+    data["time"] = format_store_time(notice.time)
+    return data
+
+
 @router.post("/add", dependencies=[Depends(get_current_admin)])
 async def add(category_pydantic: NoticeCreatePydantic):
     create_data = category_pydantic.model_dump(exclude_unset=True, exclude={'id'})
-    create_data['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    create_data['time'] = utc_now()
     await Notice.create(**create_data)
     return Result.success()
 
@@ -50,7 +56,7 @@ async def delete(user_id: int):
 @router.get("/selectAll", dependencies=[Depends(get_current_user)])
 async def select_all(name: str = ""):
     category_list = await Notice.filter(name__contains=name)
-    return Result.success(category_list)
+    return Result.success([_notice_to_dict(notice) for notice in category_list])
 
 
 @router.get("/selectPage", dependencies=[Depends(get_current_user)])
@@ -62,7 +68,7 @@ async def select(name: str = "", page_num: int = 1, page_size: int = 5):
     notice_list = await query.order_by("-id").offset((page_num - 1) * page_size).limit(page_size)
     notice_list = [
         # 遍历每个 Category 实例（ORM实例），通过 Pydantic 模型，转为字典
-        NoticePydantic.model_validate(notice).model_dump()
+        _notice_to_dict(notice)
         for notice in notice_list
     ]
     # 计算总数

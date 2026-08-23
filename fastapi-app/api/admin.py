@@ -1,8 +1,10 @@
+import secrets
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 
+from common.audit import client_ip, record_audit
 from common.auth import get_current_admin, hash_password, validate_password
 from common.exception_handler import CustomException
 from common.pagination import clamp_page
@@ -49,11 +51,12 @@ class AdminUpdate(BaseModel):
 
 
 @router.post("/add")
-async def add(data: AdminCreate):
+async def add(data: AdminCreate, current_user: dict = Depends(get_current_admin), request: Request = None):
     if await Admin.get_or_none(username=data.username) is not None:
         raise CustomException("账号重复")
     name = data.name if data.name is not None else data.username
-    password = data.password if data.password is not None else "admin"
+    generated_password = data.password is None
+    password = data.password if data.password is not None else secrets.token_urlsafe(12)
     validate_password(password)
     await Admin.create(
         username=data.username,
@@ -63,44 +66,78 @@ async def add(data: AdminCreate):
         role='管理员',
         must_change_password=True,
     )
-    return Result.success()
+    created = await Admin.get(username=data.username)
+    await record_audit(
+        current_user, "admin.create", "admin", created.id,
+        detail={"username": data.username, "password_generated": generated_password},
+        ip=client_ip(request),
+    )
+    return Result.success({"initial_password": password} if generated_password else None)
 
 
 @router.put("/update")
-async def update(data: AdminUpdate):
+async def update(data: AdminUpdate, current_user: dict = Depends(get_current_admin), request: Request = None):
     update_data = data.model_dump(exclude_unset=True, exclude={'id'})
     if 'password' in update_data:
         validate_password(update_data['password'])
         update_data['password'] = hash_password(update_data['password'])
         # 管理员重置他人密码时，令其下次登录强制改密
         update_data['must_change_password'] = True
+        target = await Admin.get_or_none(id=data.id)
+        if target is None:
+            raise CustomException("管理员不存在")
+        update_data['token_version'] = int(target.token_version) + 1
     await Admin.filter(id=data.id).update(**update_data)
+    await record_audit(
+        current_user, "admin.update", "admin", data.id,
+        detail={"fields": sorted(update_data.keys()), "password_changed": "password" in update_data},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 
 @router.delete("/delete/{admin_id}")
-async def delete(admin_id: int):
+async def delete(admin_id: int, current_user: dict = Depends(get_current_admin), request: Request = None):
+    target = await Admin.get_or_none(id=admin_id)
     await Admin.filter(id=admin_id).delete()
+    await record_audit(
+        current_user, "admin.delete", "admin", admin_id,
+        detail={"username": target.username if target else None},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 
 @router.delete("/deleteBatch")
-async def delete_batch(ids: List[int]):
+async def delete_batch(ids: List[int], current_user: dict = Depends(get_current_admin), request: Request = None):
+    targets = await Admin.filter(id__in=ids)
     await Admin.filter(id__in=ids).delete()
+    await record_audit(
+        current_user, "admin.delete_batch", "admin", None,
+        detail={"ids": ids, "usernames": [a.username for a in targets]},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 
 @router.put("/reset-password/{admin_id}")
-async def reset_password(admin_id: int, data: AdminCreate):
+async def reset_password(admin_id: int, data: AdminCreate, current_user: dict = Depends(get_current_admin), request: Request = None):
     """管理员将指定账号的密码重置为指定值，并令其下次登录强制改密。"""
     admin = await Admin.get_or_none(id=admin_id)
     if admin is None:
         raise CustomException("管理员不存在")
     if not data.password:
         raise CustomException("请提供新密码")
+    validate_password(data.password)
     await Admin.filter(id=admin_id).update(
         password=hash_password(data.password),
         must_change_password=True,
+        token_version=int(admin.token_version) + 1,
+    )
+    await record_audit(
+        current_user, "admin.reset_password", "admin", admin_id,
+        detail={"username": admin.username, "forced_change": True},
+        ip=client_ip(request),
     )
     return Result.success()
 

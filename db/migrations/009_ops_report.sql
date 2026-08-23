@@ -1,4 +1,3 @@
-USE `cake_store`;
 SET NAMES utf8mb4;
 
 -- 运营日报持久化：每次生成落库，历史可回看。

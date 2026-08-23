@@ -41,6 +41,25 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('@element-plus/icons-vue')) return 'vendor-element-icons'
+          if (id.includes('element-plus/es/components/')) {
+            const component = id.split('element-plus/es/components/')[1]?.split('/')[0]
+            return component ? `element-${component}` : 'vendor-element'
+          }
+          if (id.includes('element-plus')) return 'vendor-element-core'
+          if (id.includes('marked') || id.includes('dompurify')) return 'vendor-markdown'
+          if (id.includes('/vue/') || id.includes('vue-router')) return 'vendor-vue'
+          if (id.includes('axios')) return 'vendor-http'
+          return 'vendor'
+        },
+      },
+    },
+  },
   css: {
     preprocessorOptions: {
       scss: {

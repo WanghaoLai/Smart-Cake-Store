@@ -5,11 +5,11 @@ from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.transactions import in_transaction
 
-from common.auth import get_current_user
-from common.exception_handler import CustomException
+from common.auth import get_current_customer, get_current_user
+from common.exception_handler import CustomException, ForbiddenException, NotFoundException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
-from models import Address, City, Province, Town
+from models import Address, City, Orders, Province, Town
 
 router = APIRouter(prefix="/address", dependencies=[Depends(get_current_user)])
 
@@ -136,7 +136,7 @@ async def _maybe_promote_default(user_id: int) -> None:
 
 
 @router.post("/add")
-async def add(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_user)):
+async def add(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_customer)):
     create_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
     await _resolve_region_names(create_data)
     create_data = _strip_relation_keys(create_data)
@@ -159,14 +159,14 @@ async def add(address_pydantic: AddressCreatePydantic, current_user: dict = Depe
 
 
 @router.put("/update")
-async def update(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_user)):
+async def update(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_customer)):
     if address_pydantic.id is None:
         raise CustomException("地址ID不能为空")
     target = await Address.get_or_none(id=address_pydantic.id)
     if target is None:
-        raise CustomException("地址不存在")
-    if current_user["role"] != "管理员" and target.user_id != current_user["user_id"]:
-        raise CustomException("无权操作该地址")
+        raise NotFoundException("地址不存在")
+    if target.user_id != current_user["user_id"]:
+        raise ForbiddenException("无权操作该地址")
     update_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
     await _resolve_region_names(update_data)
     update_data = _strip_relation_keys(update_data)
@@ -196,13 +196,13 @@ async def update(address_pydantic: AddressCreatePydantic, current_user: dict = D
 
 
 @router.put("/set_default/{address_id}")
-async def set_default(address_id: int, current_user: dict = Depends(get_current_user)):
+async def set_default(address_id: int, current_user: dict = Depends(get_current_customer)):
     """把指定地址设为当前用户的默认地址。其他地址同步置 false（事务内）。"""
     target = await Address.get_or_none(id=address_id)
     if target is None:
-        raise CustomException("地址不存在")
-    if current_user["role"] != "管理员" and target.user_id != current_user["user_id"]:
-        raise CustomException("无权操作该地址")
+        raise NotFoundException("地址不存在")
+    if target.user_id != current_user["user_id"]:
+        raise ForbiddenException("无权操作该地址")
     async with in_transaction():
         await _enforce_default_uniqueness(target.user_id, exclude_id=address_id)
         await Address.filter(id=address_id).update(is_default=True)
@@ -210,14 +210,16 @@ async def set_default(address_id: int, current_user: dict = Depends(get_current_
 
 
 @router.delete("/delete/{address_id}")
-async def delete(address_id: int, current_user: dict = Depends(get_current_user)):
+async def delete(address_id: int, current_user: dict = Depends(get_current_customer)):
     target = await Address.get_or_none(id=address_id)
     if target is None:
-        raise CustomException("地址不存在")
-    if current_user["role"] != "管理员" and target.user_id != current_user["user_id"]:
-        raise CustomException("无权操作该地址")
+        raise NotFoundException("地址不存在")
+    if target.user_id != current_user["user_id"]:
+        raise ForbiddenException("无权操作该地址")
     user_id = target.user_id
     was_default = target.is_default
+    if await Orders.filter(address_id=address_id).exists():
+        raise CustomException("该地址已被历史订单引用，不能删除，可新增其他地址")
     await Address.filter(id=address_id).delete()
     # 删除的是默认地址：自动把同 user 最早的一条提升为默认
     if was_default:
@@ -260,5 +262,3 @@ async def select(address: str = "", userId: int = 0,  pageNum: int = 1, pageSize
     # 封装分页数据
     pageinfo = PageInfo(total=total, list=address_list)
     return Result.success(pageinfo)
-
-

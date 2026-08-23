@@ -78,7 +78,7 @@ const data = reactive({
 
 const load = () => {
   request.get('/knowledge/list').then(res => {
-    if (res.code === '200') data.tableData = res.data || []
+    if (res.code === '200') data.tableData = res.data?.list || []
   })
   request.get('/knowledge/stats').then(res => {
     if (res.code === '200') data.stats = res.data || {}

@@ -1,6 +1,5 @@
 """商品评价：用户提交（文本+多图+星级），公开浏览，管理员回复。"""
 import json
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -8,12 +7,13 @@ from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.transactions import in_transaction
 
-from common.auth import get_current_admin, get_current_user
+from common.auth import get_current_admin, get_current_customer, get_current_user
 from common.exception_handler import CustomException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
+from common.time import format_store_time, utc_now
 from models import Review, Orders, Goods
-from api.orders import ORDER_PENDING_REVIEW, ORDER_REVIEWED
+from domain.order_status import ORDER_PENDING_REVIEW, ORDER_RECEIVED, ORDER_REVIEWED
 
 router = APIRouter(prefix="/reviews", dependencies=[Depends(get_current_user)])
 
@@ -62,6 +62,9 @@ def _to_dict(review, include_user: bool = True) -> dict:
     base["goodsId"] = review.goods_id
     base["orderId"] = review.order_id
     base["userId"] = review.user_id
+    base["time"] = format_store_time(review.time)
+    base["replyTime"] = format_store_time(review.reply_time) or None
+    base.pop("reply_time", None)
     if not include_user:
         base.pop("userName", None)
         base.pop("userAvatar", None)
@@ -69,7 +72,7 @@ def _to_dict(review, include_user: bool = True) -> dict:
 
 
 @router.post("/add")
-async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depends(get_current_user)):
+async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depends(get_current_customer)):
     """用户提交评价。
     校验：订单归属当前用户、订单状态在 待评价、商品 ID 与订单一致。
     副作用：评价写入 + 订单状态推进到 已评价（同一事务，避免悬空评价）。"""
@@ -86,7 +89,7 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
         # （兼容历史 已签收 状态也允许直接评价）
         allowed_keys = {
             ("用户", ORDER_PENDING_REVIEW, ORDER_REVIEWED),
-            ("用户", "已签收", ORDER_REVIEWED),
+            ("用户", ORDER_RECEIVED, ORDER_REVIEWED),
         }
         if key not in allowed_keys:
             raise CustomException(f"订单当前状态({order.status})不允许评价")
@@ -96,9 +99,16 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
         if existed:
             raise CustomException("该订单已评价，无法重复评价")
 
-        goods_id = review_pydantic.goods_id or order.goods_id
-        if goods_id is None:
+        if order.goods_id is None:
             raise CustomException("缺少商品信息")
+        # 评价的商品身份只能由服务端已核实的订单决定。
+        # 保留 goodsId 仅为兼容旧客户端，一旦传入必须与订单一致。
+        if (
+            review_pydantic.goods_id is not None
+            and review_pydantic.goods_id != order.goods_id
+        ):
+            raise CustomException("评价商品与订单商品不一致")
+        goods_id = order.goods_id
 
         # images 是 JSON 字符串：必须是数组且张数有界
         images = review_pydantic.images
@@ -110,7 +120,6 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
             if not isinstance(parsed, list) or len(parsed) > 9:
                 raise CustomException("评价图片最多 9 张")
 
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         await Review.create(
             goods_id=goods_id,
             user_id=current_user["user_id"],
@@ -118,7 +127,7 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
             rating=review_pydantic.rating,
             content=review_pydantic.content,
             images=review_pydantic.images,
-            time=now_str,
+            time=utc_now(),
         )
         order.status = ORDER_REVIEWED
         await order.save(update_fields=['status'])
@@ -127,11 +136,14 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
 
 
 @router.get("/goods/{goods_id}")
-async def list_by_goods(goods_id: int):
-    """商品详情页：返回该商品全部评价（含管理员回复）。
+async def list_by_goods(goods_id: int, pageNum: int = 1, pageSize: int = 20):
+    """商品详情页：分页返回评价（含管理员回复）。
     评价是公开信息，但接口仍走登录鉴权（与现有 /goods/detail 一致）。"""
-    reviews = await Review.filter(goods_id=goods_id).prefetch_related('user', 'goods').order_by('-id')
-    return Result.success([_to_dict(r) for r in reviews])
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
+    query = Review.filter(goods_id=goods_id).prefetch_related('user', 'goods').order_by('-id')
+    total = await query.count()
+    reviews = await query.offset((pageNum - 1) * pageSize).limit(pageSize)
+    return Result.success(PageInfo(total=total, list=[_to_dict(r) for r in reviews]))
 
 
 @router.put("/reply/{review_id}", dependencies=[Depends(get_current_admin)])
@@ -144,7 +156,7 @@ async def reply(
     if review is None:
         raise CustomException("评价不存在")
     review.reply = payload.reply
-    review.reply_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    review.reply_time = utc_now()
     await review.save(update_fields=['reply', 'reply_time'])
     return Result.success()
 

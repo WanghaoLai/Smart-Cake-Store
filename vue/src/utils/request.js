@@ -44,11 +44,15 @@ request.interceptors.response.use(
         return res;
     },
         error => {
-            if (error.response && error.response.status === 401) {
+            const status = error.response?.status
+            const payload = error.response?.data
+            if (status === 401) {
                 ElMessage.error('登录已过期，请重新登录');
                 localStorage.removeItem('token');
                 localStorage.removeItem('system-user');
                 router.push('/login');
+            } else if (payload?.msg) {
+                ElMessage.error(payload.msg)
             }
             console.error('请求失败:', error)
             return Promise.reject(error)

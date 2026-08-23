@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from agents.config import AgentProfile
-from agents.tools.product import build_verified_product_answer, validate_product_answer
+from agents.tools.product import rebuild_product_answer
 
 from .harness import AgentComponents, AgentContext
 from .grounding import format_grounding_message
@@ -236,21 +236,20 @@ class CustomerServiceAgent:
 
         if "MySQL实时商品" in grounding_sources:
             try:
-                if not await validate_product_answer(answer):
-                    logger.info(
-                        "agent answer_rebuilt conversation_id=%s user_id=%s reason=mysql_validation_failed",
-                        conversation_id, user_id,
-                    )
-                    answer = await build_verified_product_answer(
-                        "\n".join([
-                            *[
-                                str(item.get("content", ""))
-                                for item in history[-6:]
-                                if item.get("role") == "user"
-                            ],
-                            user_message,
-                        ])
-                    )
+                query = "\n".join([
+                    *[
+                        str(item.get("content", ""))
+                        for item in history[-6:]
+                        if item.get("role") == "user"
+                    ],
+                    user_message,
+                ])
+                # 模型只通过结构化 product_ids 选择候选；事实字段由数据库重建。
+                answer = await rebuild_product_answer(answer, query)
+                logger.info(
+                    "agent answer_rebuilt conversation_id=%s user_id=%s reason=mysql_authoritative_render",
+                    conversation_id, user_id,
+                )
             except Exception as exc:
                 logger.warning(
                     "agent rebuild_failed conversation_id=%s user_id=%s error=%s",

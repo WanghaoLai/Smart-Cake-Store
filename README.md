@@ -135,12 +135,12 @@ cd vue && npm install && cd ..
 
 | 角色 | 用户名 | 密码 |
 |------|--------|------|
-| 管理员 | `222` | `222` |
-| 用户 | `234` | `234` |
+| 管理员 | `222` | `DemoAdmin!2026` |
+| 用户 | `234` | `DemoUser!2026` |
 
 > 没有账号也可以在登录页点击注册，创建用户角色账号。
 >
-> **默认密码策略**：管理员在后台新建用户/管理员且不填密码时，默认密码为 `123`（管理员为 `admin`）。该账号会被标记 `must_change_password=True`，首次登录强制跳转改密页，不改密无法使用系统——上线前请确认此闭环未被移除，或改为随机密码一次性下发给使用者。
+> **初始密码策略**：后台新建用户/管理员且不填密码时，服务端生成强随机一次性密码，只在创建成功时显示一次。账号被标记 `must_change_password=True`，后端除改密接口外拒绝其他请求；改密或管理员重置密码后，旧 Token 立即失效。上述演示账号也会在首次登录后强制改密。
 >
 > 全新库默认没有商品数据（图片文件不入 Git），需要演示商品时执行：`cd fastapi-app && python3 scripts/seed_goods.py`。
 
@@ -228,9 +228,9 @@ samrt_cake_store/
 ├── docs/                         # 项目文档（架构说明、审查报告、改进路线图）
 ├── db/                           # 数据库唯一入口（详见 db/README.md）
 │   ├── migrate.sh                # 幂等迁移执行器（自动建库 + schema + 种子 + 增量）
-│   ├── cake_store.sql            # 基础 schema（纯 DDL；001–009 已预标记）
+│   ├── cake_store.sql            # 基础 schema（纯 DDL；001–011 已预标记）
 │   ├── seed_base.sql             # 基础种子：演示账号(bcrypt) + 区划 + 分类公告
-│   └── migrations/               # 增量迁移 001–009 + archive/ 历史留档
+│   └── migrations/               # 增量迁移 001–011 + archive/ 历史留档
 ├── logs/                         # 启动日志（运行时生成，不入库）
 │
 ├── fastapi-app/                  # 后端
@@ -252,7 +252,7 @@ samrt_cake_store/
 │   │   ├── prompt.py             # 系统提示词组装
 │   │   └── factory.py            # Agent 组合根（create_agent + 限额中间件）
 │   ├── common/                   # JWT、密码、统一响应、异常、分页 clamp、限流
-│   ├── tests/                    # 72 个回归测试（Agent/工具/API/架构约束/业务规则）
+│   ├── tests/                    # 97 个回归测试（Agent/工具/API/安全/业务规则）
 │   ├── chroma_db/                # 向量索引（可重建，不入库）
 │   └── files/                    # 上传文件（goods/avatar 种子图入库分发；review 运行时不入库）
 │
@@ -266,7 +266,7 @@ samrt_cake_store/
 
 ## 数据库与迁移
 
-`db/migrate.sh` 的工作流：读取 `fastapi-app/.env` 连接信息（命令行环境变量优先，如 `DB_NAME=xxx` 可临时切库）→ 目标库不存在时自动创建 → 若 `orders` 表不存在则依次导入 `db/cake_store.sql`（基础 schema，001–009 已预标记不会重放）和 `db/seed_base.sql`（演示账号/区划/分类/公告，幂等）→ 按文件名升序执行 `db/migrations/*.sql`，已应用的自动跳过。全程强制 utf8mb4，可安全重跑。详见 [db/README.md](db/README.md)。
+`db/migrate.sh` 的工作流：读取 `fastapi-app/.env` 连接信息（命令行环境变量优先，如 `DB_NAME=xxx` 可临时切库）→ 目标库不存在时自动创建 → 若 `orders` 表不存在则依次导入 `db/cake_store.sql`（基础 schema，001–011 已预标记不会重放）和 `db/seed_base.sql`（演示账号/区划/分类/公告，幂等）→ 按文件名升序执行 `db/migrations/*.sql`，已应用的自动跳过。全程强制 utf8mb4，可安全重跑。详见 [db/README.md](db/README.md)。
 
 ### 数据表一览
 
@@ -286,13 +286,13 @@ samrt_cake_store/
 | `knowledge` | Knowledge | RAG 知识文档元数据；文档内容向量化存于 ChromaDB，原文不落盘 |
 | `index_task` | IndexTask | 商品 → 向量索引同步 outbox；业务事务只写本表，后台异步同步 ChromaDB，失败重试 3 次 |
 | `ops_report` | OpsReport | 运营报告落库（经营日报 + 商品分析报告，`facts.kind` 区分），供历史回看与 Markdown 下载 |
-| `_schema_migrations` | — | `migrate.sh` 的迁移执行记录；基础 dump 已预标记 001–009，全新部署导入后自动跳过对应迁移 |
+| `_schema_migrations` | — | `migrate.sh` 的迁移执行记录；基础 dump 已预标记 001–011，全新部署导入后自动跳过对应迁移 |
 
 种子数据说明（`seed_base.sql`，全部 `INSERT IGNORE` 幂等）：演示账号 `222`/`234` 以 bcrypt 哈希预置；省市区三级区划 3380 行（地址级联依赖）；7 个商品分类与初始公告。**真实业务数据（地址、聊天、订单）不出现在仓库中**——商品与运营演示数据分别由 `seed_goods.py`、`seed_analysis_data.py` 按需生成。
 
 新增表结构变更时：
 
-1. 在 `db/migrations/` 下新建 `NNN_描述.sql`（编号递增，当前下一个是 `010`），只写增量 DDL。
+1. 在 `db/migrations/` 下新建 `NNN_描述.sql`（编号递增，当前下一个是 `012`），只写增量 DDL。
 2. 本地执行 `./db/migrate.sh` 验证。
 3. 不要手动修改 `db/cake_store.sql`——它包含 `DROP TABLE`，对已有数据手工重跑会清库（执行器已内置防重入保护）。
 
@@ -326,13 +326,20 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```bash
 # 后端回归测试（无需数据库，SQLite 内存模式）
 PYTHONPATH=fastapi-app python3 -m unittest discover -s fastapi-app/tests -v
-# 或：PYTHONPATH=fastapi-app python3 -m pytest fastapi-app/tests -q   （当前 72 个用例）
+# 或：PYTHONPATH=fastapi-app python3 -m pytest fastapi-app/tests -q   （当前 111 个用例）
+# 本地等价 CI 方式：cd fastapi-app && pip install -r requirements-dev.txt && python -m pytest tests/ -q
 
 # 前端构建验证
 cd vue && npm run build
 ```
 
-后端测试覆盖：Agent 协议与边界、LangChain 工具调用、Grounding 取证、订单工具、聊天 API、语义搜索与推荐引擎、运营分析接口，业务规则集成测试（价格快照、状态机、库存、防重复评价、统计口径），以及架构约束（路由唯一、CORS 不放开全源、提示词覆盖全部白名单工具等）。
+后端测试覆盖：Agent 协议与边界、LangChain 工具调用、Grounding 取证、订单工具、聊天 API、语义搜索与推荐引擎、运营分析接口、认证安全与操作审计，业务规则集成测试（价格快照、状态机、库存、防重复评价、统计口径），以及架构约束（路由唯一、CORS 不放开全源、提示词覆盖全部白名单工具等）。
+
+### 持续集成（CI）
+
+`.github/workflows/ci.yml` 在 push / PR 时自动执行：后端 `pip install -r requirements.txt -r requirements-dev.txt && python -m pytest tests/`（Python 3.12，SQLite 内存，无需 MySQL；CI 用占位 `JWT_SECRET_KEY` 环境变量通过启动校验）+ 前端 `npm ci && npm run build`（Node 18）。
+
+> **合并门槛**：建议仓库管理员在 GitHub 分支保护中将 "CI" 状态检查设为 required，测试未通过不得合并。
 
 ## 生产部署要点
 

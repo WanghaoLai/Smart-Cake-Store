@@ -27,3 +27,11 @@ class SlidingWindowRateLimiter:
                 return False
             events.append(now)
             return True
+
+    def reset(self, key: str) -> None:
+        """清除一个主体的失败窗口。
+
+        认证成功后账号维度应重置，否则用户正常重新登录也会被当成爆破。
+        """
+        with self._lock:
+            self._events.pop(key, None)

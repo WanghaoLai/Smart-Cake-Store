@@ -1,4 +1,3 @@
-USE `cake_store`;
 SET NAMES utf8mb4;
 
 -- User 与 Admin 位于独立表且主键可能重叠，不能使用只指向 user(id) 的外键

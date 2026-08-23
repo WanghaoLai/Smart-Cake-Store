@@ -2,10 +2,16 @@
 
 历史版本用独立 SQLAlchemy 引擎探测 /health/db，测的不是业务链路，
 且依赖 chromadb 的传递依赖才能 import——本版本已整体移除 core/ 双 ORM 栈。"""
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, Depends
+from starlette.responses import JSONResponse
 from tortoise import Tortoise
 
+from common.auth import get_current_admin
 from settings import APP_ENV
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/health",
@@ -32,8 +38,10 @@ async def _probe(query: str) -> dict:
         conn = Tortoise.get_connection("default")
         rows = await conn.execute_query_dict(query)
         return {"status": "ok", **rows[0]}
-    except Exception as e:  # noqa: BLE001 - 健康检查要把任何失败转成结构化响应
-        return {"status": "error", "error_type": type(e).__name__, "message": str(e)}
+    except Exception:  # noqa: BLE001 - 健康检查要捕获所有连接失败
+        logger.exception("database health probe failed")
+        # 对外不返回驱动异常、主机或账号；详情仅在服务端日志中。
+        return {"status": "error"}
 
 
 @router.get("/db")
@@ -43,13 +51,14 @@ async def database_health():
     """
     result = await _probe("SELECT 1 AS connection_test")
     if result["status"] == "ok":
-        result["database"] = "connected"
-    else:
-        result["database"] = "connection_failed"
-    return result
+        return {"status": "ok", "database": "connected"}
+    return JSONResponse(
+        status_code=503,
+        content={"status": "error", "database": "connection_failed"},
+    )
 
 
-@router.get("/db/info")
+@router.get("/db/info", dependencies=[Depends(get_current_admin)])
 async def database_info():
     """
     获取数据库基本信息。

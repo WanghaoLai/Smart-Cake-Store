@@ -36,6 +36,7 @@ class CancelOrderRepositoryTests(unittest.IsolatedAsyncioTestCase):
         )
         goods = SimpleNamespace(name="草莓蛋糕", num=5, save=AsyncMock())
 
+        notify = AsyncMock()
         with patch(
             "agents.tools.order.repository.in_transaction",
             return_value=AsyncTransaction(),
@@ -45,6 +46,8 @@ class CancelOrderRepositoryTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "agents.tools.order.repository.Goods.filter",
             return_value=LockedQuery(goods),
+        ), patch(
+            "agents.tools.order.repository.notify_order_event", notify,
         ):
             result = await cancel_order(user_id=7, order_no="202608130001")
 
@@ -53,6 +56,8 @@ class CancelOrderRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(goods.num, 7)
         goods.save.assert_awaited_once_with(update_fields=["num"])
         self.assertIn("库存已恢复", result)
+        # 取消成功必须伴随买家通知（同事务）
+        notify.assert_awaited_once_with(order, goods.name)
 
     async def test_repeated_cancel_does_not_restore_inventory_twice(self):
         order = SimpleNamespace(
@@ -71,7 +76,9 @@ class CancelOrderRepositoryTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "agents.tools.order.repository.Orders.filter",
             return_value=LockedQuery(order),
-        ), patch("agents.tools.order.repository.Goods.filter", goods_filter):
+        ), patch("agents.tools.order.repository.Goods.filter", goods_filter), patch(
+            "agents.tools.order.repository.notify_order_event", AsyncMock(),
+        ):
             result = await cancel_order(user_id=7, order_no="202608130001")
 
         goods_filter.assert_not_called()
@@ -97,6 +104,8 @@ class CancelOrderRepositoryTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "agents.tools.order.repository.Goods.filter",
             return_value=LockedQuery(None),
+        ), patch(
+            "agents.tools.order.repository.notify_order_event", AsyncMock(),
         ):
             result = await cancel_order(user_id=7, order_no="202608130001")
 

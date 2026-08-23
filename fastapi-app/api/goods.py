@@ -1,15 +1,17 @@
 import logging
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, BackgroundTasks
-from pydantic import create_model, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.transactions import in_transaction
 
 from common.auth import get_current_user, get_current_admin
+from common.exception_handler import CustomException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
-from models import Goods, IndexTask
+from models import Favorite, Goods, IndexTask, Orders, Review
 from agents.rag import index_task_service
 from agents.recommendation import search
 
@@ -18,14 +20,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/goods", dependencies=[Depends(get_current_user)])
 
 GoodsPydantic = pydantic_model_creator(Goods)
-GoodsCreatePydantic = create_model(
-    "GoodsPydantic",
-    **{
-        name: (Optional[field.annotation], None)
-        for name, field in GoodsPydantic.model_fields.items()
-    },
-    category_id=(Optional[int], Field(None, alias="categoryId"))
-)
+
+
+class _GoodsWriteBase(BaseModel):
+    """商品可写字段白名单；关系对象、反向关系和服务端字段不能由请求注入。"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    description: Optional[str] = Field(None, max_length=255)
+    detail: Optional[str] = None
+    ingredients: Optional[str] = Field(None, max_length=500)
+    specs: Optional[str] = Field(None, max_length=255)
+    shelf_life: Optional[str] = Field(None, max_length=100, alias="shelfLife")
+    weight: Optional[str] = Field(None, max_length=100)
+    origin: Optional[str] = Field(None, max_length=100)
+    serves: Optional[str] = Field(None, max_length=100)
+    img: Optional[str] = Field(None, max_length=255)
+    unit: Optional[str] = Field(None, max_length=255)
+    category_id: Optional[int] = Field(None, gt=0, alias="categoryId")
+
+    @field_validator("description", "detail", "ingredients", "specs", "shelf_life",
+                     "weight", "origin", "serves", "img", "unit", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+
+class GoodsCreate(_GoodsWriteBase):
+    name: str = Field(..., min_length=1, max_length=255)
+    price: Decimal = Field(..., ge=0, max_digits=10, decimal_places=2)
+    num: int = Field(..., ge=0)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("商品名称不能为空")
+        return value
+
+
+class GoodsUpdate(_GoodsWriteBase):
+    id: int = Field(..., gt=0)
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    price: Optional[Decimal] = Field(None, ge=0, max_digits=10, decimal_places=2)
+    num: Optional[int] = Field(None, ge=0)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_update_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("商品名称不能为空")
+        return value
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if not (self.model_fields_set - {"id"}):
+            raise ValueError("至少需要提供一个待更新字段")
+        return self
 
 
 async def _process_index_task_safe(task_id: int) -> None:
@@ -40,8 +98,8 @@ async def _process_index_task_safe(task_id: int) -> None:
 
 
 @router.post("/add", dependencies=[Depends(get_current_admin)])
-async def add(goods_pydantic: GoodsCreatePydantic, background_tasks: BackgroundTasks):
-    create_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
+async def add(goods_pydantic: GoodsCreate, background_tasks: BackgroundTasks):
+    create_data = goods_pydantic.model_dump(exclude_unset=True)
     async with in_transaction():
         goods = await Goods.create(**create_data)
         task = await IndexTask.create(
@@ -52,7 +110,7 @@ async def add(goods_pydantic: GoodsCreatePydantic, background_tasks: BackgroundT
 
 
 @router.put("/update", dependencies=[Depends(get_current_admin)])
-async def update(goods_pydantic: GoodsCreatePydantic, background_tasks: BackgroundTasks):
+async def update(goods_pydantic: GoodsUpdate, background_tasks: BackgroundTasks):
     update_data = goods_pydantic.model_dump(exclude_unset=True, exclude={'id'})
     async with in_transaction():
         affected = await Goods.filter(id=goods_pydantic.id).update(**update_data)
@@ -69,6 +127,10 @@ async def update(goods_pydantic: GoodsCreatePydantic, background_tasks: Backgrou
 @router.delete("/delete/{goods_id}", dependencies=[Depends(get_current_admin)])
 async def delete(goods_id: int, background_tasks: BackgroundTasks):
     async with in_transaction():
+        if await Orders.filter(goods_id=goods_id).exists() or await Review.filter(goods_id=goods_id).exists():
+            raise CustomException("商品已产生订单或评价，为保留审计记录不能删除")
+        # 收藏是可派生关系；无交易记录时可随商品一并清理。
+        await Favorite.filter(goods_id=goods_id).delete()
         affected = await Goods.filter(id=goods_id).delete()
         task = None
         if affected > 0:

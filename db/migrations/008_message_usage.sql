@@ -1,4 +1,3 @@
-USE `cake_store`;
 SET NAMES utf8mb4;
 
 -- AI 可观测性：把 LangChain 返回的 usage_metadata 与耗时落到 message 表。

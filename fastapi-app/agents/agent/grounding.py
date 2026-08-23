@@ -95,6 +95,12 @@ def format_grounding_message(evidence: list[GroundingEvidence]) -> str:
     ]
     for item in evidence:
         sections.append(f"\n【{item.source}】\n{item.content}")
+    if any(item.source == "MySQL实时商品" for item in evidence):
+        sections.append(
+            "\n若回答涉及商品，只返回一个 JSON 对象选择商品，例如 "
+            '{"product_ids":[12,8]}；不得自行输出商品名称、价格或库存，'
+            "这些字段将由服务端依据 ID 从 MySQL 渲染。"
+        )
     return "".join(sections)
 
 

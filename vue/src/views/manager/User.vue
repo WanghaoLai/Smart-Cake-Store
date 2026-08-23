@@ -173,8 +173,8 @@ const doResetPwd = () => {
     ElMessage.error('请输入新密码')
     return
   }
-  if (data.pwdForm.newPassword.length < 6) {
-    ElMessage.error('新密码至少 6 位')
+  if (data.pwdForm.newPassword.length < 8) {
+    ElMessage.error('新密码至少 8 位')
     return
   }
   data.resetting = true
@@ -190,7 +190,15 @@ const doResetPwd = () => {
 const add = () => {
   request.post('/user/add', data.form).then(res => {
     if (res.code === '200') {
-      ElMessage.success(`操作成功，初始密码：${data.form.password || '123'}`); data.formVisible = false; load()
+      const generated = res.data?.initial_password
+      if (generated) {
+        ElMessageBox.alert(`初始密码：${generated}\n请通过安全渠道一次性下发，关闭后不再显示。`, '账号创建成功', {
+          confirmButtonText: '我已安全保存',
+        })
+      } else {
+        ElMessage.success('操作成功')
+      }
+      data.formVisible = false; load()
     } else { ElMessage.error(res.msg) }
   })
 }

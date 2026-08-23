@@ -18,9 +18,9 @@ samrt_cake_store/
 │   └── archive/                    本地归档：过时开发方案与历史规划（不入库）
 ├── db/                             数据库唯一入口（说明见 db/README.md）
 │   ├── migrate.sh                  幂等迁移执行器（自动建库 + schema + 种子 + 增量）
-│   ├── cake_store.sql              基础 schema（纯 DDL；001–009 已预标记）
+│   ├── cake_store.sql              基础 schema（纯 DDL；001–011 已预标记）
 │   ├── seed_base.sql               基础种子：演示账号 + 区划 + 分类公告（幂等）
-│   └── migrations/                 增量迁移 001–009 + archive/ 历史留档
+│   └── migrations/                 增量迁移 001–011 + archive/ 历史留档
 ├── logs/                           启动日志（latest 软链接指向最近一次）
 ├── fastapi-app/                    FastAPI 后端
 └── vue/                            Vue 3 + Vite 前端
@@ -85,7 +85,7 @@ fastapi-app/
 │   ├── pagination.py               分页 clamp（1..100）
 │   └── rate_limit.py               进程内滑动窗口限流器（接口兼容 Redis 替换）
 │
-└── tests/                          后端回归测试（72 个用例）
+└── tests/                          后端回归测试（97 个用例）
     ├── test_agent_executor.py       Agent 协议、工具和边界测试
     ├── test_agent_tools.py          LangChain 原生工具调用测试
     ├── test_grounding.py            MySQL / ChromaDB 取证测试
@@ -157,7 +157,7 @@ SQL 聚合产出确定性事实 → 事实摘要由服务端注入 → 分析师
 验证命令
 --------
 
-后端（当前 72 个用例，无需外部数据库）：
+后端（当前 97 个用例，无需外部数据库）：
 PYTHONPATH=fastapi-app python3 -m unittest discover -s fastapi-app/tests -v
 
 前端：

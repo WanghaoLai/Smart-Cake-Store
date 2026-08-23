@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, xiaohao]
+  pull_request:
+
+jobs:
+  backend:
+    name: 后端测试（pytest）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fastapi-app
+    env:
+      # settings.py 启动时强制校验 JWT 密钥强度；CI 环境无 .env，
+      # 用仅测试用途的占位密钥（≥32 字符，不签发任何生产 Token）。
+      JWT_SECRET_KEY: ci-only-placeholder-secret-key-32-chars-min
+      # 不配置 DASHSCOPE_API_KEY：Agent 标记 configured=False，
+      # 测试全部走 SQLite 内存 / mock，不触外部 LLM。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: fastapi-app/requirements-dev.txt
+      - name: 安装依赖
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: 运行测试
+        # 必须用 python -m pytest（而非 pytest）：依赖 CWD 加入 sys.path
+        run: python -m pytest tests/ -q
+
+  frontend:
+    name: 前端构建（vite build）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: vue/package-lock.json
+      - name: 安装依赖
+        run: npm ci
+      - name: 构建
+        run: npm run build

@@ -118,7 +118,14 @@ const add = () => {
   request.post('/admin/add', data.form).then(res => {
     if (res.code === '200') {
       load(); data.formVisible = false
-      ElMessage.success(`操作成功，初始密码：${data.form.password || 'admin'}`)
+      const generated = res.data?.initial_password
+      if (generated) {
+        ElMessageBox.alert(`初始密码：${generated}\n请通过安全渠道一次性下发，关闭后不再显示。`, '管理员创建成功', {
+          confirmButtonText: '我已安全保存',
+        })
+      } else {
+        ElMessage.success('操作成功')
+      }
     } else { ElMessage.error(res.msg) }
   })
 }

@@ -1,4 +1,3 @@
-USE `cake_store`;
 SET NAMES utf8mb4;
 
 -- 文件 URL 相对化：历史数据把 request.base_url 拼出的绝对地址入库，
