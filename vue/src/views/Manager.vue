@@ -39,6 +39,35 @@
             </button>
           </el-tooltip>
 
+          <!-- 订单站内通知：未读角标 + 最近通知，60s 轮询（分钟级实时性足够） -->
+          <el-popover placement="bottom" :width="340" trigger="click" @show="loadNotifications">
+            <template #reference>
+              <span class="bell-wrap">
+                <el-badge :value="notif.unread" :hidden="!notif.unread" :max="99">
+                  <el-icon :size="20"><Bell /></el-icon>
+                </el-badge>
+              </span>
+            </template>
+            <div class="notif-panel">
+              <div class="notif-head">
+                <span>订单通知</span>
+                <el-button v-if="notif.unread" link type="primary" size="small" @click="markAllRead">
+                  全部已读
+                </el-button>
+              </div>
+              <div v-if="!notif.list.length" class="notif-empty">暂无通知</div>
+              <div
+                v-for="n in notif.list" :key="n.id"
+                class="notif-item" :class="{ unread: !n.isRead }"
+                @click="router.push('/manager/orders')"
+              >
+                <div class="notif-title line1">{{ n.title }}</div>
+                <div class="notif-content line1">{{ n.content }}</div>
+                <div class="notif-time">{{ n.createdAt }}</div>
+              </div>
+            </div>
+          </el-popover>
+
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-chip">
               <el-avatar :size="36" :src="$fileUrl(data.user.avatar) || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
@@ -228,14 +257,23 @@ import {
   SwitchButton, Cherry, Grid, Coin, Refrigerator, Avatar, Position, SoldOut,
   Location, Monitor, Document, Star, ChatLineSquare,
   Sunset, Present, GobletSquare, MagicStick, Watch, Medal, Trophy,
-  DataAnalysis, TrendCharts,
+  DataAnalysis, TrendCharts, Bell,
 } from "@element-plus/icons-vue";
 import request from "@/utils/request";
 
-// 预加载所有侧栏页面 chunk：
-// 侧栏路由均为懒加载，首次点击菜单时浏览器才拉取对应 JS 并触发 Vite 按需编译，
-// 造成"卡顿、停留在首页"。进入系统后即并行预取所有页面 chunk，首次点击即瞬时响应。
-const pageChunks = import.meta.glob('@/views/manager/*.vue')
+// 仅预取角色对应的高频路径。低频管理页继续保持真正的按路由懒加载。
+const commonPrefetch = [() => import('@/views/manager/Home.vue')]
+const rolePrefetch = {
+  '管理员': [
+    () => import('@/views/manager/Goods.vue'),
+    () => import('@/views/manager/Orders.vue'),
+  ],
+  '用户': [
+    () => import('@/views/manager/Cake.vue'),
+    () => import('@/views/manager/Orders.vue'),
+    () => import('@/views/manager/Favorite.vue'),
+  ],
+}
 
 const data = reactive({
   user: JSON.parse(localStorage.getItem('system-user') || '{}'),
@@ -245,9 +283,12 @@ const data = reactive({
   categoryList: [],
 })
 
-// 进入系统后预取所有页面，消除首次点击菜单的编译/下载等待
+// 浏览器空闲时预取少量高频页，避免阻塞首屏和登录后的网络带宽。
 onMounted(() => {
-  Object.values(pageChunks).forEach(load => load().catch(() => {}))
+  const loaders = [...commonPrefetch, ...(rolePrefetch[data.user.role] || [])]
+  const prefetch = () => loaders.forEach(load => load().catch(() => {}))
+  if ('requestIdleCallback' in window) window.requestIdleCallback(prefetch, { timeout: 1500 })
+  else window.setTimeout(prefetch, 300)
 })
 
 // 分类图标映射
@@ -292,6 +333,44 @@ onMounted(() => {
 onUnmounted(() => {
   if (focusHandler) window.removeEventListener('focus', focusHandler)
   if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler)
+})
+
+// ==================== 订单站内通知 ====================
+// 轮询起步（60s）：分钟级实时性足够——蛋糕制作配送本身以小时计，
+// 不为省几次空查询引入 WebSocket/SSE
+const notif = reactive({ unread: 0, list: [] })
+
+const loadUnreadCount = () => {
+  request.get('/notification/unread-count').then(res => {
+    if (res.code === '200') notif.unread = res.data?.count || 0
+  }).catch(() => {})
+}
+
+const loadNotifications = () => {
+  request.get('/notification/list', { params: { pageNum: 1, pageSize: 8 } }).then(res => {
+    if (res.code === '200') {
+      notif.list = res.data?.list || []
+      loadUnreadCount()
+    }
+  }).catch(() => {})
+}
+
+const markAllRead = () => {
+  request.put('/notification/read-all').then(res => {
+    if (res.code === '200') {
+      notif.unread = 0
+      notif.list.forEach(n => { n.isRead = true })
+    }
+  }).catch(() => {})
+}
+
+let notifTimer = null
+onMounted(() => {
+  loadUnreadCount()
+  notifTimer = window.setInterval(loadUnreadCount, 60 * 1000)
+})
+onUnmounted(() => {
+  if (notifTimer) window.clearInterval(notifTimer)
 })
 
 if (!data.user?.id) {
@@ -385,6 +464,64 @@ const handleSearch = () => {
   color: var(--c-primary);
   background: var(--c-primary-soft);
 }
+
+/* ==================== 订单通知铃铛 ==================== */
+.bell-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--c-bg-soft);
+  color: var(--c-text-regular);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease-out);
+}
+.bell-wrap:hover {
+  color: var(--c-primary);
+  background: var(--c-primary-soft);
+}
+.notif-panel {
+  margin: -4px -8px;
+}
+.notif-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid var(--c-border);
+  font-weight: 600;
+  font-size: 14px;
+}
+.notif-empty {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--c-text-secondary);
+  font-size: 13px;
+}
+.notif-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--c-bg-soft); }
+.notif-item.unread .notif-title { font-weight: 600; }
+.notif-item.unread .notif-title::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-danger);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.notif-title { font-size: 13px; color: var(--c-text); }
+.notif-content { font-size: 12px; color: var(--c-text-secondary); margin-top: 2px; }
+.notif-time { font-size: 11px; color: var(--c-text-placeholder); margin-top: 2px; }
 
 .brand {
   display: flex;

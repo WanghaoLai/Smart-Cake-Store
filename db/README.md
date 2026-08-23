@@ -8,7 +8,7 @@
 db/
 ├── README.md                # 本文件
 ├── migrate.sh               # 幂等迁移执行器（唯一执行入口）
-├── cake_store.sql           # 基础 schema（纯 DDL，2026-08-22 基线：已包含 001–009 全部
+├── cake_store.sql           # 基础 schema（纯 DDL，2026-08-23 基线：已包含 001–011 全部
 │                            #   结构变更，并在 _schema_migrations 中预标记为已应用）
 ├── seed_base.sql            # 全新部署基础种子：演示账号(bcrypt) + 省市区区划(3380 行)
 │                            #   + 分类 + 公告；全部 INSERT IGNORE，幂等可重跑
@@ -22,6 +22,8 @@ db/
     ├── 007_file_url_relative.sql        # 存量上传 URL 清洗为相对路径
     ├── 008_message_usage.sql            # message 表 token 用量计量列
     ├── 009_ops_report.sql               # 运营报告表
+    ├── 010_security_integrity.sql       # 认证撤销、唯一约束、外键与索引
+    ├── 011_review_recommendations.sql   # 商品非空、outbox 租约与 UTC 时间
     └── archive/             # 已合并进基础 dump 的历史迁移（不再执行，仅留档）
 ```
 
@@ -41,9 +43,9 @@ db/
 ./db/migrate.sh
 ```
 
-执行器自动完成：建库（不存在时）→ 导入基础 schema（001–009 已预标记，不会重放）→ 导入基础种子（演示账号/区划/分类/公告）→ 执行未应用的增量迁移。
+执行器自动完成：建库（不存在时）→ 导入基础 schema（001–011 已预标记，不会重放）→ 导入基础种子（演示账号/区划/分类/公告）→ 执行未应用的增量迁移。
 
-完成后即可用演示账号登录：管理员 `222/222`，用户 `234/234`。
+完成后即可用演示账号登录：管理员 `222/DemoAdmin!2026`，用户 `234/DemoUser!2026`。两个账号首次登录后都必须改密。
 
 ### 存量环境升级
 
@@ -67,7 +69,7 @@ mysql -uroot -p<password> --default-character-set=utf8mb4 cake_store < db/migrat
 
 ## 新增迁移
 
-1. 文件名格式：`NNN_<动词>_<对象>.sql`（编号递增，当前下一个是 `010`），例如 `010_add_user_avatar_field.sql`
+1. 文件名格式：`NNN_<动词>_<对象>.sql`（编号递增，当前下一个是 `012`），例如 `012_add_user_avatar_field.sql`
 2. 文件开头必须包含 `SET NAMES utf8mb4;`（防止字符集陷阱）
 3. 不需要写幂等保护（执行器通过 `_schema_migrations` 表跳过已应用的）
 4. 不要修改已发布过的迁移文件，新需求开新文件

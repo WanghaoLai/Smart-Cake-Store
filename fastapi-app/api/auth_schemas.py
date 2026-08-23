@@ -1,18 +1,20 @@
 """认证相关 Pydantic 模型。"""
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=64)
     password: str
     name: str | None = None
     avatar: str | None = None
 
 
 class LoginRequest(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=64)
     password: str
-    role: str
+    role: Literal["用户", "管理员"]
 
 
 class PasswordUpdateRequest(BaseModel):

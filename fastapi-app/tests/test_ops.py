@@ -12,6 +12,7 @@ from decimal import Decimal
 from tortoise import Tortoise
 
 from agents.ops.analysis import (
+    build_product_fact_snapshot,
     classify_sentiment,
     composite_score,
     inventory_analysis,
@@ -133,6 +134,13 @@ class ProductAnalysisSqlTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(data["score"]["grade"], "ABCD")
         self.assertIn("sales", data["score"]["dimensions"])
         self.assertEqual(data["stock"], 4)
+
+    async def test_fact_snapshot_reuses_sql_aggregates(self):
+        facts = await build_product_fact_snapshot(1, days=30)
+        self.assertEqual(facts["sales"]["total_qty"], 3)
+        self.assertEqual(facts["performance"]["stock"], 4)
+        warning_names = [row["name"] for row in facts["inventory"]["warning_list"]]
+        self.assertIn("草莓蛋糕", warning_names)
 
     async def test_build_product_markdown(self):
         perf = await product_performance(1, days=30)

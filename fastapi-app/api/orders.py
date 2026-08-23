@@ -1,42 +1,31 @@
-from datetime import datetime
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
-from common.auth import get_current_user
-from common.exception_handler import CustomException
+from common.audit import client_ip, record_audit
+from common.auth import get_current_customer, get_current_user
+from common.exception_handler import ConflictException, CustomException, ForbiddenException, NotFoundException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
-from models import Orders, Goods
+from common.time import STORE_TIMEZONE, format_store_time, utc_now
+from models import Address, Goods, Orders
+from domain.notifications import notify_order_event
+from domain.order_status import (
+    ALLOWED_TRANSITIONS,
+    ORDER_CANCELLED,
+    ORDER_PENDING,
+    ORDER_PENDING_REVIEW,
+    ORDER_RECEIVED,
+    ORDER_REVIEWED,
+    ORDER_SHIPPED,
+)
 
 router = APIRouter(prefix="/orders", dependencies=[Depends(get_current_user)])
-
-# 订单状态常量：集中定义，避免魔法字符串散落各文件
-ORDER_PENDING = "待发货"
-ORDER_SHIPPED = "已发货"
-# "已签收"语义上等同于"待评价"（签收后等待评价）；为兼容历史数据保留常量，
-# 但新流转不再使用，迁移脚本会把历史 已签收 回填为 待评价
-ORDER_RECEIVED = "已签收"
-ORDER_PENDING_REVIEW = "待评价"
-ORDER_REVIEWED = "已评价"
-ORDER_CANCELLED = "已取消"
-
-# 状态机：(角色, 当前状态, 目标状态) -> 允许
-# 取消订单时由 update_status 内部统一恢复库存，调用方无需关心
-ALLOWED_TRANSITIONS = {
-    ("管理员", ORDER_PENDING, ORDER_SHIPPED),
-    ("管理员", ORDER_PENDING, ORDER_CANCELLED),
-    # 用户确认签收 = 进入待评价；评价提交完成后由 /reviews/add 推进到 已评价
-    ("用户", ORDER_SHIPPED, ORDER_PENDING_REVIEW),
-    ("用户", ORDER_RECEIVED, ORDER_PENDING_REVIEW),
-    ("用户", ORDER_PENDING, ORDER_CANCELLED),
-    ("用户", ORDER_SHIPPED, ORDER_CANCELLED),
-}
 
 # 创建 pydantic 只读模型 把数据库模型转化成pydantic模型
 OrdersPydantic = pydantic_model_creator(Orders)
@@ -57,17 +46,19 @@ OrdersCreatePydantic = create_model(
 def _generate_order_no() -> str:
     """秒级时间戳（可读、便于客服按时间定位）+ 6 位 hex 随机（同秒碰撞概率 ~6e-8）。
     唯一性最终由 DB 唯一索引保证，生成端只需尽力降低碰撞。"""
-    return datetime.now().strftime('%Y%m%d%H%M%S') + uuid.uuid4().hex[:6].upper()
+    return utc_now().astimezone(STORE_TIMEZONE).strftime('%Y%m%d%H%M%S') + uuid.uuid4().hex[:6].upper()
 
 
 @router.post("/add")
-async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depends(get_current_user)):
+async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depends(get_current_customer)):
     if orders_pydantic.goods_id is None:
         raise CustomException("请选择要购买的商品")
     if orders_pydantic.num is None or orders_pydantic.num <= 0:
         raise CustomException("购买数量必须大于 0")
+    if orders_pydantic.address_id is None:
+        raise CustomException("请选择收货地址")
 
-    time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    created_at = utc_now()
 
     # 库存校验、订单写入、库存扣减必须在同一事务同一行锁内完成，否则并发超卖。
     # 订单号撞上唯一索引（概率极低）时整体重试一次：换新号重新走完整事务，
@@ -75,18 +66,26 @@ async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depend
     for _ in range(2):
         try:
             async with in_transaction():
+                # 地址是订单中的 PII 边界：必须同时按 id + 当前用户查询，
+                # 不能先按 id 查再在应用层“相信”客户端传入的 userId。
+                address = await Address.get_or_none(
+                    id=orders_pydantic.address_id,
+                    user_id=current_user["user_id"],
+                )
+                if address is None:
+                    raise ForbiddenException("收货地址不存在或不属于当前用户")
                 goods = await Goods.filter(id=orders_pydantic.goods_id).select_for_update().first()
                 if goods is None:
-                    raise CustomException("商品不存在")
+                    raise NotFoundException("商品不存在")
                 if goods.num < orders_pydantic.num:
-                    raise CustomException(f"库存不足，剩余 {goods.num} {goods.unit or '个'}")
+                    raise ConflictException(f"库存不足，剩余 {goods.num} {goods.unit or '个'}")
 
                 await Orders.create(
                     user_id=current_user["user_id"],
                     goods_id=orders_pydantic.goods_id,
                     address_id=orders_pydantic.address_id,
                     num=orders_pydantic.num,
-                    time=time_str,
+                    time=created_at,
                     order_no=_generate_order_no(),
                     status=ORDER_PENDING,
                     # 下单即锁定成交价，改价不影响历史订单
@@ -104,29 +103,51 @@ async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depend
 
 
 @router.delete("/delete/{id}")
-async def delete(id: int, current_user: dict = Depends(get_current_user)):
-    # 归属校验 + 库存恢复 + 订单删除原子化
+async def delete(id: int, current_user: dict = Depends(get_current_user), request: Request = None):
+    """兼容历史 DELETE 契约，但不再物理删除订单。
+
+    订单是资金、库存与评价的审计根：物理删除任意状态的订单会
+    同时擦除历史并错误回补库存。因此该端点现在仅执行与 update_status
+    相同的“取消”语义；已取消时幂等成功，其他终态明确拒绝。
+    """
     async with in_transaction():
         order = await Orders.filter(id=id).select_for_update().first()
         if order is None:
-            raise CustomException("订单不存在")
+            raise NotFoundException("订单不存在")
         if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
-            raise CustomException("无权操作该订单")
+            raise ForbiddenException("无权操作该订单")
 
-        # 已取消的订单在状态变更时已恢复过库存，这里避免二次回补
-        if order.status != ORDER_CANCELLED and order.goods_id:
-            goods = await Goods.filter(id=order.goods_id).select_for_update().first()
-            if goods:
-                goods.num += order.num
-                await goods.save(update_fields=['num'])
+        if order.status == ORDER_CANCELLED:
+            return Result.success()
 
-        await Orders.filter(id=id).delete()
+        from_status = order.status
+        key = (current_user["role"], order.status, ORDER_CANCELLED)
+        if key not in ALLOWED_TRANSITIONS:
+            raise ConflictException(f"当前状态({order.status})不允许取消")
 
+        if not order.goods_id:
+            raise CustomException("订单缺少商品信息，无法安全恢复库存")
+        goods = await Goods.filter(id=order.goods_id).select_for_update().first()
+        if goods is None:
+            raise CustomException("订单商品不存在，无法安全取消")
+        goods.num += order.num
+        await goods.save(update_fields=['num'])
+
+        order.status = ORDER_CANCELLED
+        await order.save(update_fields=['status'])
+        # 通知即业务副产物：与状态变更同事务，状态变了必有通知
+        await notify_order_event(order, goods.name)
+
+    await record_audit(
+        current_user, "order.cancel", "order", id,
+        detail={"order_no": order.order_no, "from": from_status},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 
 @router.put("/update_status/{id}")
-async def update_status(id: int, status: str, current_user: dict = Depends(get_current_user)):
+async def update_status(id: int, status: str, current_user: dict = Depends(get_current_user), request: Request = None):
     """订单状态变更：按 (角色, 当前状态, 目标状态) 状态机校验。
     取消订单在同一事务内恢复库存，与 delete 路径互不重叠。"""
     status = (status or "").strip()
@@ -136,24 +157,38 @@ async def update_status(id: int, status: str, current_user: dict = Depends(get_c
     async with in_transaction():
         order = await Orders.filter(id=id).select_for_update().first()
         if order is None:
-            raise CustomException("订单不存在")
+            raise NotFoundException("订单不存在")
         if current_user["role"] != "管理员" and order.user_id != current_user["user_id"]:
-            raise CustomException("无权操作该订单")
+            raise ForbiddenException("无权操作该订单")
 
         key = (current_user["role"], order.status, status)
         if key not in ALLOWED_TRANSITIONS:
-            raise CustomException(f"当前状态({order.status})不允许变更为({status})")
+            raise ConflictException(f"当前状态({order.status})不允许变更为({status})")
 
         # 仅"已取消"是终态需要回补库存；其他正向流转不动库存
+        goods_name = None
         if status == ORDER_CANCELLED and order.status != ORDER_CANCELLED and order.goods_id:
             goods = await Goods.filter(id=order.goods_id).select_for_update().first()
             if goods:
                 goods.num += order.num
                 await goods.save(update_fields=['num'])
+                goods_name = goods.name
+        elif status == ORDER_SHIPPED and order.goods_id:
+            # 发货通知需要商品名；查询失败不阻断状态变更（通知内容降级为"商品"）
+            goods = await Goods.get_or_none(id=order.goods_id)
+            goods_name = goods.name if goods else None
 
+        from_status = order.status
         order.status = status
         await order.save(update_fields=['status'])
+        await notify_order_event(order, goods_name)
 
+    # 审计在事务提交后 best-effort 记录：状态机拒绝时不留审计噪声
+    await record_audit(
+        current_user, "order.status_change", "order", id,
+        detail={"order_no": order.order_no, "from": from_status, "to": status},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 
@@ -180,6 +215,7 @@ async def select(goodsName: str = "", userId: int = 0, status: str = "",
     orders_list = [
         {
             **OrdersPydantic.model_validate(orders).model_dump(),  # id=xxx,no=xxx,name=xxx
+            "time": format_store_time(orders.time),
             "goodsName": orders.goods.name if orders.goods else None,
             "goodsUnit": orders.goods.unit if orders.goods else None,
             "goodsImg": orders.goods.img if orders.goods else None,

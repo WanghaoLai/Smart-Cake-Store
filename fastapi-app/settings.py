@@ -57,7 +57,8 @@ TORTOISE_ORM = {
       }
     },
     "use_tz": True,
-    "timezone": APP_TIMEZONE
+    # 所有数据库 datetime 统一采用 UTC；APP_TIMEZONE 仅用于展示边界。
+    "timezone": "UTC"
 }
 
 # ---- 智能问答 / LLM ----
@@ -66,6 +67,18 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 # /chat/send 限流：每用户每窗口期最多 N 条（每条 = 一次 LLM + Embedding 成本）
 CHAT_RATE_LIMIT = int(os.getenv("CHAT_RATE_LIMIT", "20"))
 CHAT_RATE_WINDOW_SECONDS = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
+
+# 认证入口保护：账号维度防爆破，IP 维度防止攻击者轮换用户名。
+AUTH_RATE_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_WINDOW_SECONDS", "300"))
+LOGIN_RATE_LIMIT_PER_ACCOUNT = int(os.getenv("LOGIN_RATE_LIMIT_PER_ACCOUNT", "5"))
+LOGIN_RATE_LIMIT_PER_IP = int(os.getenv("LOGIN_RATE_LIMIT_PER_IP", "30"))
+REGISTER_RATE_LIMIT_PER_IP = int(os.getenv("REGISTER_RATE_LIMIT_PER_IP", "10"))
+
+# 评价图片是普通用户可写磁盘的唯一入口：单文件限制外再加频率和总额。
+REVIEW_UPLOAD_RATE_LIMIT = int(os.getenv("REVIEW_UPLOAD_RATE_LIMIT", "20"))
+REVIEW_UPLOAD_RATE_WINDOW_SECONDS = int(os.getenv("REVIEW_UPLOAD_RATE_WINDOW_SECONDS", "3600"))
+REVIEW_UPLOAD_USER_QUOTA_BYTES = int(os.getenv("REVIEW_UPLOAD_USER_QUOTA_BYTES", str(100 * 1024 * 1024)))
+REVIEW_UPLOAD_GLOBAL_QUOTA_BYTES = int(os.getenv("REVIEW_UPLOAD_GLOBAL_QUOTA_BYTES", str(1024 * 1024 * 1024)))
 
 # ---- 语义搜索 / 个性化推荐（纯规则，无 LLM）----
 # heat_weight：热度对向量相似分的加成幅度（0 = 纯语义排序），可线上调参

@@ -1,4 +1,3 @@
-USE `cake_store`;
 SET NAMES utf8mb4;
 
 -- 订单价格快照：金额原本在查询时用 goods.price*num 现算，管理员改价会

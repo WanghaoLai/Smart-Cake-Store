@@ -1,0 +1,8 @@
+# ============================================================
+# 测试与开发工具依赖（生产运行不需要，CI 与本地统一使用）
+# 安装：pip install -r requirements.txt -r requirements-dev.txt
+# ============================================================
+
+# 测试运行器：现有测试为 unittest 风格 + pytest runner
+# （python -m pytest tests/，依赖 CWD=fastapi-app 提供 sys.path）
+pytest>=8,<10

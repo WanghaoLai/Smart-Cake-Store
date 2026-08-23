@@ -4,12 +4,13 @@ from tortoise import fields
 # 创建Admin的Model
 class Admin(Model):
     id = fields.IntField(pk=True, null=False)
-    username = fields.CharField(max_length=255, null=True)
+    username = fields.CharField(max_length=255, null=True, unique=True)
     password = fields.CharField(max_length=255, null=True)
     name = fields.CharField(max_length=255, null=True)
     avatar = fields.CharField(max_length=255, null=True)
     role = fields.CharField(max_length=255, null=True)
     must_change_password = fields.BooleanField(default=True)
+    token_version = fields.IntField(default=0)
 
     class Meta:
         table = 'admin'
@@ -18,12 +19,13 @@ class Admin(Model):
 # 创建User的Model
 class User(Model):
     id = fields.IntField(pk=True, null=False)
-    username = fields.CharField(max_length=255, null=True)
+    username = fields.CharField(max_length=255, null=True, unique=True)
     password = fields.CharField(max_length=255, null=True)
     name = fields.CharField(max_length=255, null=True)
     avatar = fields.CharField(max_length=255, null=True)
     role = fields.CharField(max_length=255, null=True)
     must_change_password = fields.BooleanField(default=True)
+    token_version = fields.IntField(default=0)
 
     class Meta:
         table = 'user'
@@ -41,9 +43,9 @@ class Category(Model):
 # 创建Goods的Model
 class Goods(Model):
     id = fields.IntField(pk=True, null=False)
-    name = fields.CharField(max_length=255, null=True)
+    name = fields.CharField(max_length=255, null=False)
     # 金额字段：DECIMAL(10,2)，浮点会在 sum 聚合中累积精度误差（0.1+0.2≠0.3）
-    price = fields.DecimalField(max_digits=10, decimal_places=2, null=True)
+    price = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
     description = fields.CharField(max_length=255, null=True)
     # 详情页扩展字段：从第一性原理出发，用户购买前需要确认
     # 配料（过敏原）/ 详细介绍 / 规格 / 保质期 / 净含量 / 产地 / 适用人数
@@ -55,16 +57,16 @@ class Goods(Model):
     origin = fields.CharField(max_length=100, null=True)
     serves = fields.CharField(max_length=100, null=True)
     img = fields.CharField(max_length=255, null=True)
-    num = fields.IntField(null=True)
+    num = fields.IntField(null=False)
     unit = fields.CharField(max_length=255, null=True)
-    category = fields.ForeignKeyField('models.Category', null=True)
+    category = fields.ForeignKeyField('models.Category', null=True, on_delete=fields.SET_NULL)
 
     class Meta:
         table = 'goods'
 
 class Address(Model):
     id = fields.IntField(pk=True, null=False)
-    user = fields.ForeignKeyField('models.User', null=True)
+    user = fields.ForeignKeyField('models.User', null=True, on_delete=fields.RESTRICT)
     name = fields.CharField(max_length=255, null=True)
     phone = fields.CharField(max_length=255, null=True)
     # 结构化地址：省/市/区县 ID + 冗余名称（地区表只读，冗余存储避免每次 3 表 join）
@@ -115,10 +117,10 @@ class Orders(Model):
     # 唯一约束：订单号是用户查询订单的主键式凭据，同号会导致按号查询命中他人订单
     order_no = fields.CharField(max_length=255, null=True, unique=True)
     num = fields.IntField(null=True)
-    user = fields.ForeignKeyField('models.User', null=True)
-    goods = fields.ForeignKeyField('models.Goods', null=True)
-    address = fields.ForeignKeyField('models.Address', null=True)
-    time = fields.CharField(max_length=255, null=True)
+    user = fields.ForeignKeyField('models.User', null=True, on_delete=fields.RESTRICT)
+    goods = fields.ForeignKeyField('models.Goods', null=True, on_delete=fields.RESTRICT)
+    address = fields.ForeignKeyField('models.Address', null=True, on_delete=fields.RESTRICT)
+    time = fields.DatetimeField(null=False)
     # 订单状态：待发货（默认）/ 已发货 / 待评价 / 已评价 / 已取消
     # 用定长短字符串而非独立状态表：状态集合小且稳定，避免多一次 join，前端直接展示
     status = fields.CharField(max_length=32, default='待发货', null=True)
@@ -128,22 +130,25 @@ class Orders(Model):
 
     class Meta:
         table = 'orders'
+        indexes = (("user", "id"), ("goods", "time"), ("status", "time"))
 
 
 class Review(Model):
     """商品评价：1 订单 1 评价（unique order_id），公开可见，管理员可回复。
     images 存 JSON 数组字符串，避免引入图片子表。"""
     id = fields.IntField(pk=True, null=False)
-    goods = fields.ForeignKeyField('models.Goods', related_name='reviews', null=True)
-    user = fields.ForeignKeyField('models.User', null=True)
+    goods = fields.ForeignKeyField('models.Goods', related_name='reviews', null=True, on_delete=fields.RESTRICT)
+    user = fields.ForeignKeyField('models.User', null=True, on_delete=fields.RESTRICT)
     # 一单一评：order_id 唯一约束防止重复评价
-    order = fields.ForeignKeyField('models.Orders', related_name='reviews', null=True, unique=True)
+    order = fields.ForeignKeyField(
+        'models.Orders', related_name='reviews', null=True, unique=True, on_delete=fields.RESTRICT,
+    )
     rating = fields.IntField(null=True)  # 1-5 星
     content = fields.TextField(null=True)
     images = fields.TextField(null=True)  # JSON 数组字符串，如 ["url1","url2"]
     reply = fields.TextField(null=True)  # 管理员回复
-    reply_time = fields.CharField(max_length=32, null=True)
-    time = fields.CharField(max_length=32, null=True)
+    reply_time = fields.DatetimeField(null=True)
+    time = fields.DatetimeField(null=False)
 
     class Meta:
         table = 'review'
@@ -152,7 +157,7 @@ class Notice(Model):
     id = fields.IntField(pk=True, null=False)
     name = fields.CharField(max_length=255, null=True)
     content = fields.CharField(max_length=255, null=True)
-    time = fields.CharField(max_length=255, null=True)
+    time = fields.DatetimeField(null=False)
 
     class Meta:
         table = 'notice'
@@ -189,12 +194,13 @@ class Message(Model):
 
 class Favorite(Model):
     id = fields.IntField(pk=True, null=False)
-    user = fields.ForeignKeyField('models.User', null=True)
-    goods = fields.ForeignKeyField('models.Goods', null=True)
+    user = fields.ForeignKeyField('models.User', null=True, on_delete=fields.CASCADE)
+    goods = fields.ForeignKeyField('models.Goods', null=True, on_delete=fields.CASCADE)
     created_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:
         table = 'favorite'
+        unique_together = (("user", "goods"),)
 
 
 class Knowledge(Model):
@@ -216,9 +222,11 @@ class IndexTask(Model):
     entity_type = fields.CharField(max_length=32, default='goods')
     entity_id = fields.IntField()
     action = fields.CharField(max_length=16)  # upsert | delete
-    status = fields.CharField(max_length=16, default='pending')  # pending | done | failed
+    status = fields.CharField(max_length=16, default='pending')  # pending | processing | done | failed
     attempts = fields.IntField(default=0)
     last_error = fields.TextField(null=True)
+    claim_token = fields.CharField(max_length=36, null=True)
+    processing_started_at = fields.DatetimeField(null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 
@@ -237,6 +245,44 @@ class OpsReport(Model):
 
     class Meta:
         table = 'ops_report'
+
+
+class AuditLog(Model):
+    """敏感操作审计：密码重置、账号增删、订单状态强制变更、知识库删除。
+
+    best-effort 写入（业务成功后落记录，失败仅记日志），因此不设外键——
+    审计行允许引用已被删除的目标；operator_name 冗余存储防账号删除后不可读。"""
+    id = fields.IntField(pk=True, null=False)
+    operator_role = fields.CharField(max_length=16)  # 用户 / 管理员 / 系统
+    operator_id = fields.IntField()
+    operator_name = fields.CharField(max_length=255, null=True)
+    action = fields.CharField(max_length=64)          # 如 user.reset_password
+    target_type = fields.CharField(max_length=32, null=True)
+    target_id = fields.IntField(null=True)
+    detail = fields.JSONField(null=True)
+    ip = fields.CharField(max_length=64, null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'audit_log'
+
+
+class Notification(Model):
+    """订单站内通知：状态变更事务内同步写入（同事务保证不丢）。
+
+    接收者由 角色 + user_id 联合标识（User/Admin 独立建表，主键可能重叠，
+    与 Conversation 同一归属模型）；读取侧轮询，分钟级实时性足够。"""
+    id = fields.IntField(pk=True, null=False)
+    user_id = fields.IntField()
+    owner_role = fields.CharField(max_length=16, default='用户')
+    type = fields.CharField(max_length=32)          # order.shipped / order.cancelled
+    title = fields.CharField(max_length=128)
+    content = fields.CharField(max_length=500, null=True)
+    is_read = fields.BooleanField(default=False)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'notification'
 
 
 

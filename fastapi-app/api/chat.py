@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 from agents.agent import AgentUnavailableError
 from agents.factory import create_customer_service_agent
 from common.auth import get_current_user
-from common.exception_handler import CustomException
+from common.exception_handler import CustomException, ForbiddenException, NotFoundException
+from common.pagination import clamp_page
 from common.rate_limit import SlidingWindowRateLimiter
-from common.result import Result
+from common.result import PageInfo, Result
+from common.time import format_store_time
 from models import Conversation, Message
 from settings import CHAT_RATE_LIMIT, CHAT_RATE_WINDOW_SECONDS
 
@@ -48,48 +50,66 @@ async def create_conversation(
 
 
 @router.get("/conversations")
-async def get_conversations(current_user: dict = Depends(get_current_user)):
-    conversations = await Conversation.filter(
+async def get_conversations(
+    pageNum: int = 1,
+    pageSize: int = 20,
+    current_user: dict = Depends(get_current_user),
+):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
+    query = Conversation.filter(
         user_id=current_user["user_id"],
         owner_role=current_user["role"],
     ).order_by("-updated_at")
+    total = await query.count()
+    conversations = await query.offset((pageNum - 1) * pageSize).limit(pageSize)
     result = []
     for conv in conversations:
         result.append({
             "id": conv.id,
             "title": conv.title,
-            "created_at": conv.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "updated_at": conv.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": format_store_time(conv.created_at),
+            "updated_at": format_store_time(conv.updated_at)
         })
-    return Result.success(result)
+    return Result.success(PageInfo(total=total, list=result))
 
 
 async def _check_conversation_owner(conversation_id: int, current_user: dict) -> Conversation:
     """校验会话归属：本人或管理员可访问，否则抛异常。"""
     conversation = await Conversation.get_or_none(id=conversation_id)
     if conversation is None:
-        raise CustomException("会话不存在")
+        raise NotFoundException("会话不存在")
     if (
         conversation.user_id != current_user["user_id"]
         or conversation.owner_role != current_user["role"]
     ):
-        raise CustomException("无权访问该会话")
+        raise ForbiddenException("无权访问该会话")
     return conversation
 
 
 @router.get("/messages/{conversation_id}")
-async def get_messages(conversation_id: int, current_user: dict = Depends(get_current_user)):
+async def get_messages(
+    conversation_id: int,
+    pageNum: int = 1,
+    pageSize: int = 50,
+    current_user: dict = Depends(get_current_user),
+):
+    pageNum, pageSize = clamp_page(pageNum, pageSize)
     await _check_conversation_owner(conversation_id, current_user)
-    messages = await Message.filter(conversation_id=conversation_id).order_by("created_at")
+    query = Message.filter(conversation_id=conversation_id)
+    total = await query.count()
+    messages = await query.order_by("-created_at", "-id").offset(
+        (pageNum - 1) * pageSize
+    ).limit(pageSize)
+    messages.reverse()
     result = []
     for msg in messages:
         result.append({
             "id": msg.id,
             "role": msg.role,
             "content": msg.content,
-            "created_at": msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": format_store_time(msg.created_at)
         })
-    return Result.success(result)
+    return Result.success(PageInfo(total=total, list=result))
 
 
 @router.post("/send")
@@ -109,7 +129,11 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
         content=data.message
     )
 
-    history = await Message.filter(conversation_id=data.conversation_id).order_by("created_at")
+    history_limit = max(customer_service_agent.profile.max_history, 0) + 1
+    history = await Message.filter(conversation_id=data.conversation_id).order_by(
+        "-created_at", "-id"
+    ).limit(history_limit)
+    history.reverse()
     history_list = [{"role": msg.role, "content": msg.content} for msg in history]
 
     async def generate():

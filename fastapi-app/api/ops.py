@@ -5,7 +5,6 @@
   2. AI 分析（POST /ops/analysis/ai）：运营 Agent 按需调用分析工具产出结论，
      与确定性事实并列返回并落库 OpsReport，支持 Markdown 报告下载。
 全部管理员鉴权。"""
-import asyncio
 import logging
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -17,6 +16,7 @@ from pydantic import BaseModel, Field
 from agents.agent import AgentUnavailableError
 from agents.factory import create_ops_agent
 from agents.ops.analysis import (
+    build_product_fact_snapshot,
     inventory_analysis,
     product_performance,
     review_analysis,
@@ -105,22 +105,14 @@ async def ai_product_analysis(payload: ProductAnalysisRequest):
     days = _clamp_days(payload.days)
 
     # 确定性事实：无论 LLM 是否可用都返回，支撑页面卡片与报告下载
-    performance, reviews, sales, inventory = await asyncio.gather(
-        product_performance(goods.id, days),
-        review_analysis(goods.id, days),
-        sales_analysis(goods.id, days),
-        inventory_analysis(days),
-    )
+    snapshot = await build_product_fact_snapshot(goods.id, days)
     facts = {
         "kind": "product_analysis",
         "goods_id": goods.id,
         "goods_name": goods.name,
         "days": days,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "performance": performance,
-        "reviews": reviews,
-        "sales": sales,
-        "inventory": inventory,
+        **snapshot,
     }
 
     answer = None

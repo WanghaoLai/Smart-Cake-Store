@@ -1,13 +1,15 @@
+import secrets
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 
+from common.audit import client_ip, record_audit
 from common.auth import get_current_admin, hash_password, validate_password
 from common.exception_handler import CustomException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
-from models import User
+from models import Address, Favorite, Orders, Review, User
 
 router = APIRouter(prefix="/user", dependencies=[Depends(get_current_admin)])
 
@@ -49,11 +51,12 @@ class UserUpdate(BaseModel):
 
 
 @router.post("/add")
-async def add(data: UserCreate):
+async def add(data: UserCreate, current_user: dict = Depends(get_current_admin), request: Request = None):
     if await User.get_or_none(username=data.username) is not None:
         raise CustomException("账号重复")
     name = data.name if data.name is not None else data.username
-    password = data.password if data.password is not None else "123"
+    generated_password = data.password is None
+    password = data.password if data.password is not None else secrets.token_urlsafe(12)
     validate_password(password)
     await User.create(
         username=data.username,
@@ -63,23 +66,38 @@ async def add(data: UserCreate):
         role='用户',
         must_change_password=True,
     )
-    return Result.success()
+    created = await User.get(username=data.username)
+    await record_audit(
+        current_user, "user.create", "user", created.id,
+        detail={"username": data.username, "password_generated": generated_password},
+        ip=client_ip(request),
+    )
+    return Result.success({"initial_password": password} if generated_password else None)
 
 
 @router.put("/update")
-async def update(data: UserUpdate):
+async def update(data: UserUpdate, current_user: dict = Depends(get_current_admin), request: Request = None):
     update_data = data.model_dump(exclude_unset=True, exclude={'id'})
     if 'password' in update_data:
         validate_password(update_data['password'])
         update_data['password'] = hash_password(update_data['password'])
         # 管理员重置他人密码时，令其下次登录强制改密
         update_data['must_change_password'] = True
+        target = await User.get_or_none(id=data.id)
+        if target is None:
+            raise CustomException("用户不存在")
+        update_data['token_version'] = int(target.token_version) + 1
     await User.filter(id=data.id).update(**update_data)
+    await record_audit(
+        current_user, "user.update", "user", data.id,
+        detail={"fields": sorted(update_data.keys()), "password_changed": "password" in update_data},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 
 @router.put("/reset-password/{user_id}")
-async def reset_password(user_id: int, data: UserCreate):
+async def reset_password(user_id: int, data: UserCreate, current_user: dict = Depends(get_current_admin), request: Request = None):
     """管理员将指定用户密码重置为指定值，并令其下次登录强制改密。"""
     user = await User.get_or_none(id=user_id)
     if user is None:
@@ -90,13 +108,33 @@ async def reset_password(user_id: int, data: UserCreate):
     await User.filter(id=user_id).update(
         password=hash_password(data.password),
         must_change_password=True,
+        token_version=int(user.token_version) + 1,
+    )
+    await record_audit(
+        current_user, "user.reset_password", "user", user_id,
+        detail={"username": user.username, "forced_change": True},
+        ip=client_ip(request),
     )
     return Result.success()
 
 
 @router.delete("/delete/{user_id}")
-async def delete(user_id: int):
+async def delete(user_id: int, current_user: dict = Depends(get_current_admin), request: Request = None):
+    has_business_data = any((
+        await Orders.filter(user_id=user_id).exists(),
+        await Review.filter(user_id=user_id).exists(),
+        await Address.filter(user_id=user_id).exists(),
+        await Favorite.filter(user_id=user_id).exists(),
+    ))
+    if has_business_data:
+        raise CustomException("用户已有订单或关联数据，为保留审计记录不能物理删除")
+    target = await User.get_or_none(id=user_id)
     await User.filter(id=user_id).delete()
+    await record_audit(
+        current_user, "user.delete", "user", user_id,
+        detail={"username": target.username if target else None},
+        ip=client_ip(request),
+    )
     return Result.success()
 
 

@@ -23,10 +23,10 @@ SET NAMES utf8mb4;
 -- 1. 演示账号（README 快速开始引用，密码即用户名）
 -- ----------------------------
 INSERT IGNORE INTO `admin` (`id`, `username`, `password`, `name`, `role`, `must_change_password`) VALUES
-(1, '222', '$2b$12$fQR4RZU6e3aIz57EP2TkJuAg8RKLoptlCTLkVR9lZSGZc4h7h7pTq', '演示管理员', '管理员', 0);
+(1, '222', '$2b$12$rfj6TAsthdiU8ufcO1qvVOT27DlmyqtsbLwJEzSy6eMvngUmvmc0.', '演示管理员', '管理员', 1);
 
 INSERT IGNORE INTO `user` (`id`, `username`, `password`, `name`, `role`, `must_change_password`) VALUES
-(1, '234', '$2b$12$k3GFKLnZ9jVdmCAVnBRq1u5/KUf99u0uYVgqI0ZewR9vMyxU/Pb4i', '演示用户', '用户', 0);
+(1, '234', '$2b$12$1l.HLJWA3WdbIE..Hokbo.6oSe0mfCweiDYr5UmNhX4wf4PZWaBxq', '演示用户', '用户', 1);
 
 -- ----------------------------
 -- 2. 商品分类（与 seed_goods.py 的分类编号一一对应）
@@ -44,7 +44,7 @@ INSERT IGNORE INTO `category` (`id`, `name`) VALUES
 -- 3. 首页公告
 -- ----------------------------
 INSERT IGNORE INTO `notice` (`id`, `name`, `content`, `time`) VALUES
-(1, '智能商城导购与运营平台', '智能商城导购与运营平台Beta版今日已上线！', '2026-05-19 21:10:13');
+(1, '智能商城导购与运营平台', '智能商城导购与运营平台Beta版今日已上线！', '2026-05-19 13:10:13');
 
 -- ----------------------------
 -- 4. 省市区三级区划（公共行政参考数据，地址级联依赖）

@@ -160,8 +160,8 @@ class CustomerServiceAgentTests(unittest.IsolatedAsyncioTestCase):
         grounding = FakeGrounding()
         executor = make_executor(runtime, grounding_service=grounding)
         with patch(
-            "agents.agent.executor.validate_product_answer",
-            new=AsyncMock(return_value=True),
+            "agents.agent.executor.rebuild_product_answer",
+            new=AsyncMock(return_value="已根据库存回答"),
         ):
             await executor.process_message("草莓蛋糕还有货吗", [], user_id=7)
 
@@ -180,10 +180,7 @@ class CustomerServiceAgentTests(unittest.IsolatedAsyncioTestCase):
         runtime = FakeAgentRuntime("1. 经典红丝绒蛋糕 - ¥98（库存 12份）")
         executor = make_executor(runtime, grounding_service=FakeGrounding())
         with patch(
-            "agents.agent.executor.validate_product_answer",
-            new=AsyncMock(return_value=False),
-        ), patch(
-            "agents.agent.executor.build_verified_product_answer",
+            "agents.agent.executor.rebuild_product_answer",
             new=AsyncMock(return_value="1. **福寿安康祝寿蛋糕** — ¥108（库存 5份）"),
         ):
             answer = await executor.process_message("送长辈", [], user_id=7)

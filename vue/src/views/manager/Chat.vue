@@ -121,6 +121,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { streamChat } from '@/composables/useChatStream'
 
 const messagesContainer = ref(null)
 
@@ -167,7 +168,7 @@ const scrollToBottom = () => {
 const loadConversations = async () => {
   try {
     const res = await request.get('/chat/conversations')
-    if (res.code === '200') data.conversations = res.data || []
+    if (res.code === '200') data.conversations = res.data?.list || []
   } catch (e) { console.error('加载会话列表失败:', e) }
 }
 
@@ -205,7 +206,7 @@ const switchConversation = async (conversationId) => {
   try {
     const res = await request.get(`/chat/messages/${conversationId}`)
     if (res.code === '200') {
-      data.messages = res.data || []
+      data.messages = res.data?.list || []
       scrollToBottom()
     }
   } catch (e) { ElMessage.error('加载消息失败') }
@@ -263,68 +264,16 @@ const sendMessage = async () => {
   data.messages.push({ role: 'assistant', content: '' })
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      },
-      body: JSON.stringify({
-        conversation_id: data.currentConversation,
-        message: userMessage
-      })
-    })
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    // 后端业务错误（限流/无权限等）返回普通 JSON 而非 SSE 流
-    const contentType = response.headers.get('content-type') || ''
-    if (contentType.includes('application/json')) {
-      const err = await response.json()
-      throw new Error(err.msg || '发送失败')
-    }
-    if (!response.body) throw new Error('浏览器不支持流式响应')
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let assistantMessage = ''
-    let buffer = ''
-    let agentFailed = false
-
-    const handleEvent = (eventText) => {
-      const payload = eventText
-        .split('\n')
-        .filter(line => line.startsWith('data:'))
-        .map(line => line.slice(5).trimStart())
-        .join('\n')
-      if (!payload) return
-      const sseData = JSON.parse(payload)
-      if (sseData.type === 'status') {
-        data.status = sseData.message || '正在处理…'
-        return
-      }
-      if (sseData.content) {
-        assistantMessage += sseData.content
+    const { agentFailed } = await streamChat({
+      conversationId: data.currentConversation,
+      message: userMessage,
+      onStatus: status => { data.status = status },
+      onContent: content => {
         const lastMsg = data.messages[data.messages.length - 1]
-        if (lastMsg?.role === 'assistant') lastMsg.content = assistantMessage
+        if (lastMsg?.role === 'assistant') lastMsg.content = content
         scrollToBottom()
-      }
-      if (sseData.type === 'error' || (sseData.done && sseData.ok === false)) {
-        agentFailed = true
-      }
-    }
-
-    while (true) {
-      const { done, value } = await reader.read()
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-      const events = buffer.split('\n\n')
-      buffer = events.pop() || ''
-      for (const eventText of events) {
-        try { handleEvent(eventText) }
-        catch (e) { throw new Error(`SSE 数据格式错误: ${e.message}`) }
-      }
-      if (done) break
-    }
-    if (buffer.trim()) handleEvent(buffer)
+      },
+    })
     if (agentFailed) ElMessage.warning('智能客服暂时不可用，请稍后重试')
     await loadConversations()
   } catch (e) {

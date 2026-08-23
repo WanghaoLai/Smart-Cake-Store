@@ -2,12 +2,16 @@
 
 与 insights.py 同一哲学：事实全部由 SQL + 确定性规则产出，LLM 只负责表述。
 情感与评分为规则判定（星级为主、词典辅助），可单测、可复现、无外部依赖。"""
+import asyncio
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from models import Goods, Orders, Review
+from common.time import format_store_time, utc_now
+from pypika_tortoise.functions import Date as SqlDate
+from tortoise.functions import Count, Function, Sum
 
 from .insights import _count_keywords
 
@@ -24,6 +28,12 @@ _NEGATIVE_TERMS = (
 _NEGATION_PREFIX = ("不", "没", "别", "不太", "不是很")
 
 GOOD_STOCK_DAYS = (7, 30)  # 库存可售天数理想区间
+
+
+class DateOnly(Function):
+    """Portable DATE(column) expression supported by MySQL and SQLite."""
+
+    database_func = SqlDate
 
 
 def _hits(text: str, terms: tuple) -> int:
@@ -54,16 +64,50 @@ def classify_sentiment(rating: int | None, content: str) -> str:
     return "中评"
 
 
-def _since(days: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+def _since(days: int) -> datetime:
+    return utc_now() - timedelta(days=days)
 
 
-async def _valid_orders(goods_id: int | None, days: int) -> list:
-    """时间窗内有效订单（排除已取消）；goods_id 为空时全店。"""
-    qs = Orders.filter(time__gte=_since(days), status__not="已取消")
+async def _load_sales_snapshot(goods_id: int | None, days: int) -> dict:
+    """Load one reusable SQL-aggregated order snapshot for an analysis request."""
+    current_query = Orders.filter(time__gte=_since(days), status__not="已取消")
+    current_job = (
+        current_query.annotate(
+            order_count=Count("id"), total_qty=Sum("num"), total_revenue=Sum("total_price"),
+        )
+        .group_by("goods_id")
+        .values("goods_id", "order_count", "total_qty", "total_revenue")
+    )
+    jobs = [current_job, Goods.all().order_by("id")]
     if goods_id is not None:
-        qs = qs.filter(goods_id=goods_id)
-    return await qs.prefetch_related("goods")
+        jobs.extend([
+            (
+                Orders.filter(
+                    goods_id=goods_id,
+                    time__gte=_since(days * 2),
+                    time__lt=_since(days),
+                    status__not="已取消",
+                )
+                .annotate(total_qty=Sum("num"))
+                .values("total_qty")
+            ),
+            (
+                current_query.filter(goods_id=goods_id)
+                .annotate(day=DateOnly("time"), total_qty=Sum("num"))
+                .group_by("day")
+                .values("day", "total_qty")
+            ),
+        ])
+    values = await asyncio.gather(*jobs)
+    aggregates, goods_rows = values[0], values[1]
+    return {
+        "days": days,
+        "goods_id": goods_id,
+        "goods": {goods.id: goods for goods in goods_rows},
+        "sales": {row["goods_id"]: row for row in aggregates if row["goods_id"] is not None},
+        "previous_qty": int((values[2][0].get("total_qty") or 0) if goods_id is not None and values[2] else 0),
+        "daily": values[3] if goods_id is not None else [],
+    }
 
 
 # ==================== 评价分析 ====================
@@ -85,7 +129,7 @@ async def review_analysis(goods_id: int, days: int = 30) -> dict:
                 "rating": r.rating,
                 "content": content,
                 "user_name": r.user.name if r.user else "—",
-                "time": r.time or "",
+                "time": format_store_time(r.time),
             })
 
     # 差评聚焦：差评原文中的负向词频次（定位问题类型：太甜/太小/物流…）
@@ -106,7 +150,7 @@ async def review_analysis(goods_id: int, days: int = 30) -> dict:
             positive_details.append({
                 "rating": r.rating,
                 "content": content,
-                "time": r.time or "",
+                "time": format_store_time(r.time),
             })
 
     return {
@@ -128,35 +172,36 @@ async def review_analysis(goods_id: int, days: int = 30) -> dict:
 
 async def sales_analysis(goods_id: int | None = None, days: int = 30) -> dict:
     """单商品趋势 或 全店热销/滞销排行（goods_id=None 时）。"""
-    if goods_id is not None:
-        orders = await _valid_orders(goods_id, days)
-        qty = sum(o.num or 0 for o in orders)
-        revenue = sum(Decimal(o.total_price or 0) for o in orders)
+    snapshot = await _load_sales_snapshot(goods_id, days)
+    return _sales_from_snapshot(snapshot, goods_id)
 
-        # 按天趋势（含无销量的天，前端画柱状图不断档）
-        trend_counter: Counter = Counter()
-        for o in orders:
-            day = (o.time or "")[:10]
-            if day:
-                trend_counter[day] += o.num or 0
+
+def _sales_from_snapshot(snapshot: dict, goods_id: int | None) -> dict:
+    days = snapshot["days"]
+    sales_by_goods = snapshot["sales"]
+    all_goods = snapshot["goods"]
+    if goods_id is not None:
+        row = sales_by_goods.get(goods_id, {})
+        qty = int(row.get("total_qty") or 0)
+        revenue = Decimal(row.get("total_revenue") or 0)
+        trend_counter = {
+            item["day"].isoformat() if hasattr(item["day"], "isoformat") else str(item["day"])[:10]:
+            int(item.get("total_qty") or 0)
+            for item in snapshot["daily"] if item.get("day")
+        }
         today = datetime.now(timezone.utc).date()
         trend = []
         for offset in range(days - 1, -1, -1):
             day = (today - timedelta(days=offset)).isoformat()
             trend.append({"date": day, "qty": trend_counter.get(day, 0)})
 
-        # 上一窗口环比
-        prev_orders = await Orders.filter(
-            time__gte=_since(days * 2), time__lt=_since(days),
-            status__not="已取消", goods_id=goods_id,
-        )
-        prev_qty = sum(o.num or 0 for o in prev_orders)
-        goods = await Goods.get_or_none(id=goods_id)
+        prev_qty = snapshot["previous_qty"]
+        goods = all_goods.get(goods_id)
         return {
             "goods_id": goods_id,
             "goods_name": goods.name if goods else "—",
             "days": days,
-            "order_count": len(orders),
+            "order_count": int(row.get("order_count") or 0),
             "total_qty": qty,
             "total_revenue": float(revenue),
             "prev_total_qty": prev_qty,
@@ -164,13 +209,10 @@ async def sales_analysis(goods_id: int | None = None, days: int = 30) -> dict:
             "daily_trend": trend,
         }
 
-    # 全店排行
-    orders = await _valid_orders(None, days)
-    qty_by_goods: Counter = Counter()
-    for o in orders:
-        if o.goods_id:
-            qty_by_goods[o.goods_id] += o.num or 0
-    all_goods = {g.id: g for g in await Goods.all()}
+    qty_by_goods = {
+        item_goods_id: int(row.get("total_qty") or 0)
+        for item_goods_id, row in sales_by_goods.items()
+    }
 
     def _row(goods_id: int, qty: int) -> dict:
         g = all_goods.get(goods_id)
@@ -182,7 +224,10 @@ async def sales_analysis(goods_id: int | None = None, days: int = 30) -> dict:
             "price": float(g.price) if g and g.price is not None else 0,
         }
 
-    ranked = [_row(gid, qty) for gid, qty in qty_by_goods.most_common()]
+    ranked = sorted(
+        (_row(gid, qty) for gid, qty in qty_by_goods.items()),
+        key=lambda row: row["qty"], reverse=True,
+    )
     hot = ranked[:10]
     # 滞销：窗口内销量最低但仍有库存的商品（含零销量）
     with_stock = [
@@ -193,9 +238,9 @@ async def sales_analysis(goods_id: int | None = None, days: int = 30) -> dict:
     return {
         "goods_id": None,
         "days": days,
-        "order_count": len(orders),
+        "order_count": sum(int(row.get("order_count") or 0) for row in sales_by_goods.values()),
         "total_qty": sum(qty_by_goods.values()),
-        "total_revenue": float(sum(Decimal(o.total_price or 0) for o in orders)),
+        "total_revenue": float(sum(Decimal(row.get("total_revenue") or 0) for row in sales_by_goods.values())),
         "hot_ranking": hot,
         "slow_ranking": slow,
     }
@@ -234,12 +279,16 @@ def inventory_score(stock: int, sold_qty: int, days: int) -> int:
 
 
 async def inventory_analysis(days: int = 30) -> dict:
-    all_goods = await Goods.all().order_by("num")
-    orders = await _valid_orders(None, days)
-    qty_by_goods: Counter = Counter()
-    for o in orders:
-        if o.goods_id:
-            qty_by_goods[o.goods_id] += o.num or 0
+    return _inventory_from_snapshot(await _load_sales_snapshot(None, days))
+
+
+def _inventory_from_snapshot(snapshot: dict) -> dict:
+    days = snapshot["days"]
+    all_goods = sorted(snapshot["goods"].values(), key=lambda goods: goods.num)
+    qty_by_goods = {
+        goods_id: int(row.get("total_qty") or 0)
+        for goods_id, row in snapshot["sales"].items()
+    }
 
     items = []
     level_counter: Counter = Counter()
@@ -326,17 +375,20 @@ def composite_score(avg_rating: float, review_count: int,
 
 
 async def product_performance(goods_id: int, days: int = 30) -> dict:
-    sales = await sales_analysis(goods_id, days)
-    reviews = await review_analysis(goods_id, days)
-    goods = await Goods.get_or_none(id=goods_id)
+    snapshot, reviews = await asyncio.gather(
+        _load_sales_snapshot(goods_id, days), review_analysis(goods_id, days),
+    )
+    sales = _sales_from_snapshot(snapshot, goods_id)
+    return _performance_from_snapshot(snapshot, reviews, sales, goods_id)
 
-    # 销量归一化基准：窗口内全店销量冠军
-    all_orders = await _valid_orders(None, days)
-    qty_counter: Counter = Counter()
-    for o in all_orders:
-        if o.goods_id:
-            qty_counter[o.goods_id] += o.num or 0
-    top_qty = max(qty_counter.values(), default=0)
+
+def _performance_from_snapshot(snapshot: dict, reviews: dict, sales: dict, goods_id: int) -> dict:
+    days = snapshot["days"]
+    goods = snapshot["goods"].get(goods_id)
+    top_qty = max(
+        (int(row.get("total_qty") or 0) for row in snapshot["sales"].values()),
+        default=0,
+    )
 
     stock = goods.num or 0 if goods else 0
     score = composite_score(
@@ -357,7 +409,22 @@ async def product_performance(goods_id: int, days: int = 30) -> dict:
     }
 
 
+async def build_product_fact_snapshot(goods_id: int, days: int = 30) -> dict:
+    """Build every product-analysis fact from one reusable order snapshot."""
+    snapshot, reviews = await asyncio.gather(
+        _load_sales_snapshot(goods_id, days), review_analysis(goods_id, days),
+    )
+    sales = _sales_from_snapshot(snapshot, goods_id)
+    return {
+        "performance": _performance_from_snapshot(snapshot, reviews, sales, goods_id),
+        "reviews": reviews,
+        "sales": sales,
+        "inventory": _inventory_from_snapshot(snapshot),
+    }
+
+
 __all__ = [
+    "build_product_fact_snapshot",
     "classify_sentiment",
     "composite_score",
     "inventory_analysis",

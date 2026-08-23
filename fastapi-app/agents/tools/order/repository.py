@@ -2,13 +2,10 @@
 
 from tortoise.transactions import in_transaction
 
+from domain.notifications import notify_order_event
 from models import Goods, Orders
-
-
-ORDER_PENDING = "待发货"
-ORDER_SHIPPED = "已发货"
-ORDER_CANCELLED = "已取消"
-CANCELLABLE_STATUSES = {ORDER_PENDING, ORDER_SHIPPED}
+from domain.order_status import CANCELLABLE_STATUSES, ORDER_CANCELLED, ORDER_PENDING
+from common.time import format_store_time
 
 
 def _order_total(order) -> object:
@@ -33,7 +30,7 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
             f"- 单价：¥{order.goods.price if order.goods else '未知'}\n"
             f"- 总价：¥{_order_total(order)}\n"
             f"- 收货地址：{order.address.address if order.address else '未知'}\n"
-            f"- 下单时间：{order.time}\n"
+            f"- 下单时间：{format_store_time(order.time)}\n"
             f"- 状态：{order.status or '待发货'}"
         )
 
@@ -45,7 +42,7 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
         goods_name = order.goods.name if order.goods else "未知"
         total = _order_total(order)
         status = order.status or "待发货"
-        lines.append(f"- 订单号 {order.order_no or 'N/A'}：{goods_name} x{order.num}，¥{total}，{order.time}，{status}")
+        lines.append(f"- 订单号 {order.order_no or 'N/A'}：{goods_name} x{order.num}，¥{total}，{format_store_time(order.time)}，{status}")
     return "\n".join(lines)
 
 
@@ -73,6 +70,8 @@ async def cancel_order(user_id: int, order_id: int = None, order_no: str = None)
         order_label = order.order_no or order.id
         order.status = ORDER_CANCELLED
         await order.save(update_fields=["status"])
+        # 与状态变更同事务写站内通知：Agent 取消与 API 取消对买家可感知性一致
+        await notify_order_event(order, goods.name)
     return f"订单 {order_label} 已成功取消，{goods.name}的库存已恢复。"
 
 

@@ -1,4 +1,3 @@
-USE `cake_store`;
 SET NAMES utf8mb4;
 
 -- 订单号防碰撞：秒级时间戳 + 4 位随机的旧方案同秒有 1/9000 碰撞概率，

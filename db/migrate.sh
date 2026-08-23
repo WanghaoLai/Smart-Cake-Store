@@ -8,7 +8,7 @@
 #   2. 目标库不存在时自动创建（utf8mb4）
 #   3. 创建 _schema_migrations 跟踪表
 #   4. 若 orders 表不存在 → 导入 cake_store.sql（基础 schema，
-#      已预标记 001–009 为已应用）→ 导入 seed_base.sql（演示账号/
+#      已预标记 001–011 为已应用）→ 导入 seed_base.sql（演示账号/
 #      区划/分类/公告，INSERT IGNORE 幂等）
 #   5. 按文件名升序执行 migrations/*.sql，已应用的自动跳过
 #   6. 全程强制 --default-character-set=utf8mb4
@@ -65,14 +65,24 @@ if [[ -z "$DB_PASSWORD" ]]; then
   exit 1
 fi
 
+# 库名同时用于 SQL 查询与标识符；先收紧为 MySQL 安全标识符子集，
+# 避免配置错误变成意外的多语句执行。
+if [[ ! "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]]; then
+  echo "❌ DB_NAME 只能包含字母、数字和下划线" >&2
+  exit 1
+fi
+
 MYSQL_BIN="${MYSQL_BIN:-mysql}"
 if ! command -v "$MYSQL_BIN" >/dev/null 2>&1; then
   echo "❌ 找不到 mysql 客户端。macOS 默认路径 /usr/local/mysql/bin/mysql，可通过 MYSQL_BIN 环境变量指定" >&2
   exit 1
 fi
 
+# 密码不放进命令行，避免被同机器的进程列表读取。
+export MYSQL_PWD="$DB_PASSWORD"
+
 # 不带库名的连接参数（用于建库检测与创建）
-CONN_ARGS=(-h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" \
+CONN_ARGS=(-h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" \
            --default-character-set=utf8mb4)
 
 # 统一的连接参数（带库名）：强制 utf8mb4 客户端字符集，杜绝中文乱码
@@ -83,8 +93,12 @@ MYSQL_ARGS=("${CONN_ARGS[@]}" "$DB_NAME")
 # 所以先抓 mysql 真实退出码，再做过滤展示
 run_mysql() {
   local output exit_code
-  output=$("$MYSQL_BIN" "${MYSQL_ARGS[@]}" "$@" 2>&1)
-  exit_code=$?
+  # 放在 if 条件中可避免 set -e 在我们打印 MySQL 错误前提前退出。
+  if output=$("$MYSQL_BIN" "${MYSQL_ARGS[@]}" "$@" 2>&1); then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
   if [[ -n "$output" ]]; then
     echo "$output" | grep -v "Using a password" || true
   fi
@@ -93,7 +107,7 @@ run_mysql() {
 
 # ---- 0. 目标库不存在时自动创建（全新机器一条命令可用）----
 DB_EXISTS=$("$MYSQL_BIN" "${CONN_ARGS[@]}" -N -B -e \
-  "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$DB_NAME';" 2>/dev/null || true)
+  "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$DB_NAME';" 2>/dev/null)
 if [[ "$DB_EXISTS" != "1" ]]; then
   echo "▶ 目标库 $DB_NAME 不存在，自动创建（utf8mb4）..."
   "$MYSQL_BIN" "${CONN_ARGS[@]}" -e \
@@ -102,7 +116,7 @@ fi
 
 # ---- 1. 创建跟踪表（幂等）----
 echo "▶ 初始化 _schema_migrations 跟踪表..."
-run_mysql <<'SQL' || true
+run_mysql <<'SQL'
 CREATE TABLE IF NOT EXISTS `_schema_migrations` (
   `filename` varchar(255) NOT NULL,
   `applied_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -113,7 +127,7 @@ SQL
 # ---- 2. 基础 schema 检测 ----
 echo "▶ 检测 orders 表是否已初始化..."
 ORDERS_EXISTS=$(run_mysql -N -B -e \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='orders';" || true)
+  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='orders';")
 
 if [[ "$ORDERS_EXISTS" -eq 0 ]]; then
   if [[ ! -f "$BASE_SQL" ]]; then
@@ -121,10 +135,10 @@ if [[ "$ORDERS_EXISTS" -eq 0 ]]; then
     exit 1
   fi
   echo "▶ 导入基础 schema: $BASE_SQL"
-  run_mysql < "$BASE_SQL" || true
+  run_mysql < "$BASE_SQL"
   # 把基础 schema 标记为已应用（防止下次重复执行；cake_store.sql 含 DROP TABLE，重跑会清空数据）
   run_mysql -e \
-    "INSERT IGNORE INTO _schema_migrations (filename) VALUES ('__cake_store.sql');" || true
+    "INSERT IGNORE INTO _schema_migrations (filename) VALUES ('__cake_store.sql');"
   # 基础种子：演示账号/区划/分类/公告。INSERT IGNORE 幂等，失败即中止（缺失会导致无法登录）
   if [[ -f "$SEED_SQL" ]]; then
     echo "▶ 导入基础种子: $SEED_SQL"
@@ -154,7 +168,7 @@ SKIPPED=0
 for f in "${MIGRATION_FILES[@]}"; do
   name="$(basename "$f")"
   IS_APPLIED=$(run_mysql -N -B -e \
-    "SELECT COUNT(*) FROM _schema_migrations WHERE filename='$name';" || true)
+    "SELECT COUNT(*) FROM _schema_migrations WHERE filename='$name';")
 
   if [[ "$IS_APPLIED" -gt 0 ]]; then
     echo "✓ 已应用，跳过: $name"
@@ -165,7 +179,7 @@ for f in "${MIGRATION_FILES[@]}"; do
   echo "▶ 执行: $name"
   if run_mysql < "$f"; then
     run_mysql -e \
-      "INSERT INTO _schema_migrations (filename) VALUES ('$name');" || true
+      "INSERT INTO _schema_migrations (filename) VALUES ('$name');"
     APPLIED=$((APPLIED + 1))
   else
     echo "❌ 执行失败: $name" >&2
@@ -174,4 +188,4 @@ for f in "${MIGRATION_FILES[@]}"; do
 done
 
 echo ""
-echo "✅ 完成：本次应用 $APPLIED 个，跳过 $SKIPPED 个已应用的迁移（目标库：$DB_NAME）"
+echo "✅ 完成：本次应用 $APPLIED 个，跳过 $SKIPPED 个已应用的迁移（目标库：${DB_NAME}）"
