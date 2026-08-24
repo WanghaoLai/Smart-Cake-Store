@@ -13,7 +13,7 @@ from common.exception_handler import ConflictException, CustomException, Forbidd
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from common.time import STORE_TIMEZONE, format_store_time, utc_now
-from models import Address, Goods, Orders
+from models import Address, Goods, Orders, User, WalletTransaction
 from domain.notifications import notify_order_event
 from domain.order_status import (
     ALLOWED_TRANSITIONS,
@@ -49,6 +49,31 @@ def _generate_order_no() -> str:
     return utc_now().astimezone(STORE_TIMEZONE).strftime('%Y%m%d%H%M%S') + uuid.uuid4().hex[:6].upper()
 
 
+async def _refund_wallet(order: Orders) -> bool:
+    """在调用方事务中退回已支付订单；旧订单或已退款订单保持幂等。"""
+    paid = await WalletTransaction.filter(order_id=order.id, type="payment").first()
+    if paid is None:
+        return False
+    if await WalletTransaction.filter(order_id=order.id, type="refund").exists():
+        return False
+    user = await User.filter(id=order.user_id).select_for_update().first()
+    if user is None:
+        raise CustomException("订单用户不存在，无法退款")
+    amount = -paid.amount
+    user.balance += amount
+    await user.save(update_fields=["balance"])
+    await WalletTransaction.create(
+        user_id=user.id,
+        type="refund",
+        amount=amount,
+        balance_after=user.balance,
+        order_id=order.id,
+        request_id=f"refund:{order.id}",
+        remark=f"订单 {order.order_no} 取消退款",
+    )
+    return True
+
+
 @router.post("/add")
 async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depends(get_current_customer)):
     if orders_pydantic.goods_id is None:
@@ -74,13 +99,24 @@ async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depend
                 )
                 if address is None:
                     raise ForbiddenException("收货地址不存在或不属于当前用户")
+                # 固定按“商品 -> 用户”顺序加锁；取消订单也使用同一顺序，降低死锁概率。
                 goods = await Goods.filter(id=orders_pydantic.goods_id).select_for_update().first()
                 if goods is None:
                     raise NotFoundException("商品不存在")
                 if goods.num < orders_pydantic.num:
                     raise ConflictException(f"库存不足，剩余 {goods.num} {goods.unit or '个'}")
+                user = await User.filter(id=current_user["user_id"]).select_for_update().first()
+                if user is None:
+                    raise NotFoundException("用户不存在")
 
-                await Orders.create(
+                total = goods.price * orders_pydantic.num
+                if user.balance < total:
+                    shortage = total - user.balance
+                    raise ConflictException(
+                        f"余额不足，订单需 ¥{total:.2f}，当前余额 ¥{user.balance:.2f}，还差 ¥{shortage:.2f}"
+                    )
+
+                order = await Orders.create(
                     user_id=current_user["user_id"],
                     goods_id=orders_pydantic.goods_id,
                     address_id=orders_pydantic.address_id,
@@ -89,17 +125,28 @@ async def add(orders_pydantic: OrdersCreatePydantic, current_user: dict = Depend
                     order_no=_generate_order_no(),
                     status=ORDER_PENDING,
                     # 下单即锁定成交价，改价不影响历史订单
-                    total_price=goods.price * orders_pydantic.num,
+                    total_price=total,
                 )
                 goods.num -= orders_pydantic.num
                 await goods.save(update_fields=['num'])
+                user.balance -= total
+                await user.save(update_fields=['balance'])
+                await WalletTransaction.create(
+                    user_id=user.id,
+                    type="payment",
+                    amount=-total,
+                    balance_after=user.balance,
+                    order_id=order.id,
+                    request_id=f"payment:{order.id}",
+                    remark=f"支付订单 {order.order_no}",
+                )
             break
         except IntegrityError:
             continue
     else:
         raise CustomException("订单号生成冲突，请重试")
 
-    return Result.success()
+    return Result.success({"order_no": order.order_no, "balance": user.balance})
 
 
 @router.delete("/delete/{id}")
@@ -132,6 +179,8 @@ async def delete(id: int, current_user: dict = Depends(get_current_user), reques
             raise CustomException("订单商品不存在，无法安全取消")
         goods.num += order.num
         await goods.save(update_fields=['num'])
+
+        await _refund_wallet(order)
 
         order.status = ORDER_CANCELLED
         await order.save(update_fields=['status'])
@@ -173,6 +222,7 @@ async def update_status(id: int, status: str, current_user: dict = Depends(get_c
                 goods.num += order.num
                 await goods.save(update_fields=['num'])
                 goods_name = goods.name
+            await _refund_wallet(order)
         elif status == ORDER_SHIPPED and order.goods_id:
             # 发货通知需要商品名；查询失败不阻断状态变更（通知内容降级为"商品"）
             goods = await Goods.get_or_none(id=order.goods_id)

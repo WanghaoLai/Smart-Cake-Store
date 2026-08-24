@@ -15,6 +15,10 @@ def _csv_env(name: str, default: str) -> list[str]:
 # ---- 运行环境 / 前后端跨域 ----
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Shanghai")
+# 未接入真实支付网关前，仅开发环境允许模拟充值；生产环境默认关闭自助入账。
+WALLET_RECHARGE_MODE = os.getenv(
+    "WALLET_RECHARGE_MODE", "simulation" if APP_ENV == "development" else "disabled",
+).lower()
 CORS_ORIGINS = _csv_env(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,https://smart-cake-store.vercel.app",
@@ -67,6 +71,10 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 # /chat/send 限流：每用户每窗口期最多 N 条（每条 = 一次 LLM + Embedding 成本）
 CHAT_RATE_LIMIT = int(os.getenv("CHAT_RATE_LIMIT", "20"))
 CHAT_RATE_WINDOW_SECONDS = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
+
+# 商品详情 AI 问答：问题更短但同样会触发一次模型调用。
+GOODS_QA_RATE_LIMIT = int(os.getenv("GOODS_QA_RATE_LIMIT", "10"))
+GOODS_QA_RATE_WINDOW_SECONDS = int(os.getenv("GOODS_QA_RATE_WINDOW_SECONDS", "60"))
 
 # 认证入口保护：账号维度防爆破，IP 维度防止攻击者轮换用户名。
 AUTH_RATE_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_WINDOW_SECONDS", "300"))

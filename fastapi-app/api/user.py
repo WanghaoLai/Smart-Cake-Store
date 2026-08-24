@@ -1,4 +1,5 @@
 import secrets
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -9,7 +10,7 @@ from common.auth import get_current_admin, hash_password, validate_password
 from common.exception_handler import CustomException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
-from models import Address, Favorite, Orders, Review, User
+from models import Address, Favorite, Orders, Review, User, WalletTransaction
 
 router = APIRouter(prefix="/user", dependencies=[Depends(get_current_admin)])
 
@@ -26,8 +27,8 @@ class UserPublic(BaseModel):
 
 
 class UserAdminView(UserPublic):
-    """管理员后台查看视图（当前字段与 UserPublic 一致，独立声明便于后续扩展）"""
-    pass
+    """管理员可查看余额，但任何用户编辑接口都不能直接改余额。"""
+    balance: Decimal = Decimal("0.00")
 
 
 class UserCreate(BaseModel):
@@ -125,6 +126,7 @@ async def delete(user_id: int, current_user: dict = Depends(get_current_admin), 
         await Review.filter(user_id=user_id).exists(),
         await Address.filter(user_id=user_id).exists(),
         await Favorite.filter(user_id=user_id).exists(),
+        await WalletTransaction.filter(user_id=user_id).exists(),
     ))
     if has_business_data:
         raise CustomException("用户已有订单或关联数据，为保留审计记录不能物理删除")

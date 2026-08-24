@@ -1,16 +1,11 @@
 <template>
-  <section class="info-block card reviews-block">
-    <div class="block-head">
-      <h3 class="block-title">
-        <el-icon><ChatLineSquare /></el-icon>商品评价
-        <span class="reviews-count" v-if="reviews.length">({{ reviews.length }})</span>
-      </h3>
-      <div class="reviews-summary" v-if="reviews.length">
-        <el-rate :model-value="averageRating" disabled size="small" />
-        <span class="avg-num">{{ averageRating.toFixed(1) }}</span>
-      </div>
+  <div class="reviews-section">
+    <div class="reviews-summary" v-if="reviews.length">
+      <el-rate :model-value="averageRating" disabled size="small" />
+      <span class="avg-num">{{ averageRating.toFixed(1) }}</span>
+      <span class="total-num">共 {{ total }} 条评价</span>
     </div>
-    <div v-if="!reviews.length" class="reviews-empty">
+    <div v-if="!reviews.length && !loading" class="reviews-empty">
       <el-icon :size="40"><ChatLineSquare /></el-icon>
       <p>暂无评价，期待您的第一份反馈</p>
     </div>
@@ -38,28 +33,55 @@
           </div>
         </div>
       </div>
+      <div class="load-more" v-if="reviews.length < total">
+        <el-button round size="small" :loading="loading" @click="load()">加载更多评价</el-button>
+      </div>
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ChatLineSquare, Service } from '@element-plus/icons-vue'
+import request from '@/utils/request'
 
-const props = defineProps({ reviews: { type: Array, default: () => [] } })
-const averageRating = computed(() => props.reviews.length
-  ? props.reviews.reduce((sum, review) => sum + (review.rating || 0), 0) / props.reviews.length
+const props = defineProps({ goodsId: { type: [Number, String], required: true } })
+const emit = defineEmits(['loaded'])
+
+const reviews = ref([])
+const total = ref(0)
+const pageNum = ref(1)
+const loading = ref(false)
+const PAGE_SIZE = 10
+
+const averageRating = computed(() => reviews.value.length
+  ? reviews.value.reduce((sum, review) => sum + (review.rating || 0), 0) / reviews.value.length
   : 0)
 const fallbackAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
+
+const load = () => {
+  if (loading.value) return
+  loading.value = true
+  request.get(`/reviews/goods/${props.goodsId}`, { params: { pageNum: pageNum.value, pageSize: PAGE_SIZE } })
+    .then(res => {
+      if (res.code === '200') {
+        reviews.value.push(...(res.data?.list || []))
+        total.value = res.data?.total || 0
+        pageNum.value += 1
+        emit('loaded', total.value)
+      }
+    })
+    .finally(() => { loading.value = false })
+}
+
+onMounted(load)
 </script>
 
 <style scoped>
-.reviews-block { padding: 20px 24px; }
-.block-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.block-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 16px; }
-.reviews-count { margin-left: 4px; color: var(--c-text-secondary); font-weight: 500; font-size: 13px; }
-.reviews-summary { display: inline-flex; align-items: center; gap: 6px; }
-.avg-num { font-size: 14px; font-weight: 700; color: var(--c-warning); }
+.reviews-section { padding: 4px 0; }
+.reviews-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.avg-num { font-size: 15px; font-weight: 700; color: var(--c-warning); }
+.total-num { font-size: 12px; color: var(--c-text-secondary); margin-left: 4px; }
 .reviews-empty { padding: 36px 0; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--c-text-placeholder); }
 .reviews-empty p { margin: 0; font-size: 13px; }
 .review-list { display: flex; flex-direction: column; gap: 18px; }
@@ -76,4 +98,5 @@ const fallbackAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c672
 .reply-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--c-primary); }
 .reply-text { font-size: 13px; color: var(--c-text-regular); line-height: 1.6; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
 .reply-time { font-size: 11px; color: var(--c-text-placeholder); margin-top: 4px; }
+.load-more { display: flex; justify-content: center; padding: 6px 0 2px; }
 </style>

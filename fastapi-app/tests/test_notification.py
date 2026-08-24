@@ -11,7 +11,13 @@ from decimal import Decimal
 from tortoise import Tortoise
 
 from agents.tools.order import repository as order_repository
-from api.notification import list_notifications, read_all, unread_count
+from api.notification import (
+    clear_notifications,
+    list_notifications,
+    read_all,
+    read_one,
+    unread_count,
+)
 from api.orders import (
     OrdersCreatePydantic,
     add as order_add,
@@ -32,7 +38,7 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         await Tortoise.init(db_url="sqlite://:memory:", modules={"models": ["models"]})
         await Tortoise.generate_schemas()
         await User.create(id=ADMIN["user_id"], username="admin", role="管理员")
-        await User.create(id=USER["user_id"], username="buyer", role="用户")
+        await User.create(id=USER["user_id"], username="buyer", role="用户", balance=Decimal("10000.00"))
         await User.create(id=OTHER["user_id"], username="other", role="用户")
         self.address = await Address.create(
             id=1, user_id=USER["user_id"], name="买家", phone="13800000000", address="测试地址",
@@ -126,6 +132,31 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         # 他人的列表为空
         other_page = (await list_notifications(pageNum=1, pageSize=10, current_user=OTHER)).data
         self.assertEqual(other_page["total"], 0)
+
+    async def test_read_one_marks_single_and_is_owner_scoped(self):
+        o1 = await self._place_order()
+        o2 = await self._place_order()
+        await order_update_status(o1.id, "已发货", ADMIN)
+        await order_update_status(o2.id, "已发货", ADMIN)
+        first = await Notification.all().order_by("id").first()
+
+        # 他人标记无效（归属过滤）
+        await read_one(first.id, OTHER)
+        self.assertEqual((await unread_count(USER)).data["count"], 2)
+
+        # 本人标记仅这一条已读，重复点击幂等
+        await read_one(first.id, USER)
+        self.assertEqual((await unread_count(USER)).data["count"], 1)
+        self.assertTrue((await Notification.get(id=first.id)).is_read)
+        await read_one(first.id, USER)
+        self.assertEqual((await unread_count(USER)).data["count"], 1)
+
+    async def test_clear_removes_all_owner_notifications(self):
+        order = await self._place_order()
+        await order_update_status(order.id, "已发货", ADMIN)
+        await clear_notifications(USER)
+        self.assertEqual((await unread_count(USER)).data["count"], 0)
+        self.assertEqual(await Notification.all().count(), 0)
 
 
 if __name__ == "__main__":

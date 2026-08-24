@@ -100,11 +100,13 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import request from "@/utils/request";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { Search, Star, Delete, ShoppingCart, ShoppingBag, View } from "@element-plus/icons-vue";
 
 const formRef = ref()
+const router = useRouter()
 const data = reactive({
   user: JSON.parse(localStorage.getItem('system-user') || '{}'),
   form: {},
@@ -160,8 +162,15 @@ const save = () => {
         ElMessage.success('预订成功，等待商家配送')
         data.formVisible = false
       } else { ElMessage.error(res.msg) }
-    })
+    }).catch(error => handleBalanceError(error))
   })
+}
+
+const handleBalanceError = (error) => {
+  const msg = error.response?.data?.msg || ''
+  if (!msg.includes('余额不足')) return
+  ElMessageBox.confirm(`${msg}。是否前往“我的余额”充值？`, '余额不足', { confirmButtonText: '去充值', cancelButtonText: '暂不充值', type: 'warning' })
+    .then(() => router.push('/manager/person')).catch(() => {})
 }
 
 const removeFav = (goodsId) => {
