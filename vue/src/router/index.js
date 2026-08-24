@@ -21,6 +21,7 @@ const router = createRouter({
         { path: 'address', component: () => import('@/views/manager/Address.vue')},
         { path: 'cake', component: () => import('@/views/manager/Cake.vue')},
         { path: 'cake/:id', component: () => import('@/views/manager/CakeDetail.vue'), props: true},
+        { path: 'cart', component: () => import('@/views/manager/Cart.vue')},
         { path: 'orders', component: () => import('@/views/manager/Orders.vue')},
         { path: 'reviews', component: () => import('@/views/manager/Reviews.vue')},
         { path: 'notice', component: () => import('@/views/manager/Notice.vue')},

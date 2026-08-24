@@ -39,6 +39,45 @@
             </button>
           </el-tooltip>
 
+          <!-- 购物车：点击弹出商品概览，角标为商品总件数（Pinia 全局同步） -->
+          <el-popover v-if="data.user.role === '用户'" placement="bottom" :width="340" trigger="click" @show="loadCartBrief">
+            <template #reference>
+              <button class="icon-btn">
+                <el-badge :value="cartStore.count" :hidden="!cartStore.count" :max="99">
+                  <el-icon :size="20"><ShoppingCart /></el-icon>
+                </el-badge>
+              </button>
+            </template>
+            <div class="cart-pop">
+              <div class="cart-pop-head">
+                <span>购物车</span>
+                <el-button link type="primary" size="small" @click="router.push('/manager/cart')">查看全部</el-button>
+              </div>
+              <div v-if="!cartStore.items.length" class="cart-pop-empty">
+                购物车是空的，
+                <el-link type="primary" :underline="false" @click="router.push('/manager/cake')">去逛逛</el-link>
+              </div>
+              <template v-else>
+                <div v-for="i in cartStore.items.slice(0, 5)" :key="i.id"
+                     class="cart-pop-item" @click="router.push('/manager/cart')">
+                  <img :src="$fileUrl(i.goodsImg)" class="cart-pop-img" />
+                  <div class="cart-pop-info">
+                    <div class="cart-pop-name line1">{{ i.goodsName }}</div>
+                    <div class="cart-pop-meta">¥{{ Number(i.goodsPrice).toFixed(2) }} × {{ i.num }}{{ i.goodsUnit }}</div>
+                  </div>
+                  <div class="cart-pop-sub">¥{{ (Number(i.goodsPrice) * i.num).toFixed(2) }}</div>
+                </div>
+                <div v-if="cartStore.items.length > 5" class="cart-pop-more">
+                  等 {{ cartStore.items.length }} 种商品…
+                </div>
+                <div class="cart-pop-foot">
+                  <span>合计 <b>¥{{ cartBriefTotal.toFixed(2) }}</b></span>
+                  <el-button type="primary" size="small" round @click="router.push('/manager/cart')">去结算</el-button>
+                </div>
+              </template>
+            </div>
+          </el-popover>
+
           <!-- 订单站内通知：未读角标 + 最近通知，60s 轮询（分钟级实时性足够） -->
           <el-popover placement="bottom" :width="340" trigger="click" @show="loadNotifications">
             <template #reference>
@@ -144,6 +183,10 @@
               <el-icon><User /></el-icon>
               <span>个人信息</span>
             </template>
+            <el-menu-item index="/manager/cart">
+              <el-icon><ShoppingCart /></el-icon>
+              <template #title>我的购物车</template>
+            </el-menu-item>
             <el-menu-item index="/manager/orders">
               <el-icon><SoldOut /></el-icon>
               <template #title>我的订单</template>
@@ -252,17 +295,18 @@
 </template>
 
 <script setup>
-import { reactive, markRaw, onMounted, onUnmounted } from "vue";
+import { reactive, markRaw, computed, onMounted, onUnmounted } from "vue";
 import router from "@/router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Fold, Expand, Search, HomeFilled, ChatDotRound, CaretBottom, User, Lock,
   SwitchButton, Cherry, Grid, Coin, Refrigerator, Avatar, Position, SoldOut,
-  Location, Monitor, Document, Star, ChatLineSquare,
+  Location, Monitor, Document, Star, ChatLineSquare, ShoppingCart,
   Sunset, Present, GobletSquare, MagicStick, Watch, Medal, Trophy,
   DataAnalysis, TrendCharts, Bell,
 } from "@element-plus/icons-vue";
 import request from "@/utils/request";
+import { useCartStore } from "@/stores/cart";
 
 // 仅预取角色对应的高频路径。低频管理页继续保持真正的按路由懒加载。
 const commonPrefetch = [() => import('@/views/manager/Home.vue')]
@@ -396,9 +440,14 @@ const clearAll = () => {
 }
 
 let notifTimer = null
+const cartStore = useCartStore()
+// 弹层打开即刷新概览（列表与角标共用 store，弹层/购物车页天然同步）
+const loadCartBrief = () => cartStore.loadCart()
+const cartBriefTotal = computed(() => cartStore.items.reduce((sum, i) => sum + Number(i.goodsPrice) * i.num, 0))
 onMounted(() => {
   loadUnreadCount()
   notifTimer = window.setInterval(loadUnreadCount, 60 * 1000)
+  if (data.user.role === '用户') cartStore.loadCount()
 })
 onUnmounted(() => {
   if (notifTimer) window.clearInterval(notifTimer)
@@ -556,6 +605,61 @@ const handleSearch = () => {
 .notif-title { font-size: 13px; color: var(--c-text); }
 .notif-content { font-size: 12px; color: var(--c-text-secondary); margin-top: 2px; }
 .notif-time { font-size: 11px; color: var(--c-text-placeholder); margin-top: 2px; }
+
+/* ==================== 购物车概览弹层 ==================== */
+.cart-pop { margin: -4px -8px; }
+.cart-pop-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px 8px;
+  border-bottom: 1px solid var(--c-border);
+  font-weight: 600;
+  font-size: 14px;
+}
+.cart-pop-empty {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--c-text-secondary);
+  font-size: 13px;
+}
+.cart-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out);
+}
+.cart-pop-item:hover { background: var(--c-bg-soft); }
+.cart-pop-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--c-bg-soft);
+  flex-shrink: 0;
+}
+.cart-pop-info { flex: 1; min-width: 0; }
+.cart-pop-name { font-size: 13px; color: var(--c-text); font-weight: 500; }
+.cart-pop-meta { font-size: 11px; color: var(--c-text-secondary); margin-top: 3px; }
+.cart-pop-sub { font-size: 13px; font-weight: 600; color: var(--c-primary); }
+.cart-pop-more {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--c-text-placeholder);
+  border-bottom: 1px solid var(--c-border);
+}
+.cart-pop-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px 4px;
+  font-size: 13px;
+  color: var(--c-text-regular);
+}
+.cart-pop-foot b { color: var(--c-primary); font-size: 15px; }
 
 .brand {
   display: flex;

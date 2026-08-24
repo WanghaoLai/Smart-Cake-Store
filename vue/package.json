@@ -13,6 +13,7 @@
     "dompurify": "^3.4.13",
     "element-plus": "^2.8.4",
     "marked": "^18.0.4",
+    "pinia": "^4.0.3",
     "sass": "^1.69.5",
     "unplugin-element-plus": "^0.8.0",
     "vue": "^3.3.4",

@@ -310,4 +310,21 @@ class Notification(Model):
         table = 'notification'
 
 
+class Cart(Model):
+    """购物车：用户-商品-数量，同商品合并为一行（UNIQUE(user, goods)）。
+
+    非资金审计根（区别于订单）：用户注销/商品删除时级联清理。
+    selected 持久化勾选状态，跨设备同步结算选择。"""
+    id = fields.IntField(pk=True, null=False)
+    user = fields.ForeignKeyField('models.User', on_delete=fields.CASCADE)
+    goods = fields.ForeignKeyField('models.Goods', on_delete=fields.CASCADE)
+    num = fields.IntField(default=1)
+    selected = fields.BooleanField(default=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'cart'
+        unique_together = ('user', 'goods')
+
+
 
