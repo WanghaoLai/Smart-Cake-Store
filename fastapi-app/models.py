@@ -26,6 +26,8 @@ class User(Model):
     role = fields.CharField(max_length=255, null=True)
     must_change_password = fields.BooleanField(default=True)
     token_version = fields.IntField(default=0)
+    # 钱包余额只允许服务端在事务内变更；DECIMAL 避免浮点金额误差。
+    balance = fields.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
         table = 'user'
@@ -131,6 +133,29 @@ class Orders(Model):
     class Meta:
         table = 'orders'
         indexes = (("user", "id"), ("goods", "time"), ("status", "time"))
+
+
+class WalletTransaction(Model):
+    """不可变钱包流水。
+
+    balance_after 是每笔交易完成后的快照，便于用户核对和后台审计；
+    request_id 唯一，防止充值按钮重试或网络重放造成重复入账。
+    """
+    id = fields.IntField(pk=True, null=False)
+    user = fields.ForeignKeyField('models.User', related_name='wallet_transactions', on_delete=fields.RESTRICT)
+    type = fields.CharField(max_length=16)  # recharge / payment / refund
+    amount = fields.DecimalField(max_digits=12, decimal_places=2)
+    balance_after = fields.DecimalField(max_digits=12, decimal_places=2)
+    payment_method = fields.CharField(max_length=32, null=True)
+    status = fields.CharField(max_length=16, default='success')
+    order = fields.ForeignKeyField('models.Orders', null=True, on_delete=fields.RESTRICT)
+    request_id = fields.CharField(max_length=64, unique=True)
+    remark = fields.CharField(max_length=255, null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'wallet_transaction'
+        indexes = (("user", "created_at"), ("order", "type"))
 
 
 class Review(Model):

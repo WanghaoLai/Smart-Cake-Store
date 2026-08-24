@@ -30,6 +30,9 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="账户余额" prop="balance" width="140" align="right">
+          <template #default="scope"><span class="balance-cell">¥{{ Number(scope.row.balance || 0).toFixed(2) }}</span></template>
+        </el-table-column>
         <el-table-column label="操作" align="center" width="240">
           <template #default="scope">
             <div class="row-actions">
@@ -254,6 +257,12 @@ const handleImgSuccess = (res) => { data.form.avatar = res.data }
   font-size: 12px;
   color: var(--c-text-secondary);
   margin-top: 2px;
+}
+
+.balance-cell {
+  color: var(--c-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 操作列同一行三按钮 */

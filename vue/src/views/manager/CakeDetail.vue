@@ -32,7 +32,7 @@
         <!-- 右侧：购买信息 -->
         <section class="info-card card">
           <h1 class="goods-title">{{ data.goods.name }}</h1>
-          <p class="goods-subtitle">{{ data.goods.description }}</p>
+          <p class="goods-subtitle line2">{{ data.goods.description }}</p>
 
           <!-- 价格面板 -->
           <div class="price-panel">
@@ -85,7 +85,6 @@
           <div class="action-row">
             <el-button
               round
-              size="large"
               class="ghost-action"
               :class="{ active: data.favorited }"
               @click="toggleFav(data.goods.id)">
@@ -95,7 +94,6 @@
             <el-button
               type="primary"
               round
-              size="large"
               class="primary-action"
               :disabled="data.goods.num === 0"
               @click="reserveInit">
@@ -131,67 +129,8 @@
         </section>
       </div>
 
-      <!-- 详情介绍 + 信息 -->
-      <div class="detail-grid two">
-        <section class="info-block card">
-          <div class="block-head">
-            <h3 class="block-title">
-              <el-icon><Document /></el-icon>商品详情
-            </h3>
-          </div>
-          <div class="detail-text" v-if="data.goods.detail">
-            <p v-for="(line, idx) in data.goods.detail.split('\n')" :key="idx">{{ line }}</p>
-          </div>
-          <div v-else class="empty-block">暂无详细介绍</div>
-        </section>
-
-        <section class="info-block card">
-          <div class="block-head">
-            <h3 class="block-title">
-              <el-icon><InfoFilled /></el-icon>规格参数
-            </h3>
-          </div>
-          <dl class="spec-table">
-            <div class="spec-row-item">
-              <dt>规格</dt>
-              <dd>{{ data.goods.specs || '—' }}</dd>
-            </div>
-            <div class="spec-row-item">
-              <dt>净含量</dt>
-              <dd>{{ data.goods.weight || '—' }}</dd>
-            </div>
-            <div class="spec-row-item">
-              <dt>适用人数</dt>
-              <dd>{{ data.goods.serves || '—' }}</dd>
-            </div>
-            <div class="spec-row-item">
-              <dt>保质期</dt>
-              <dd>{{ data.goods.shelf_life || '—' }}</dd>
-            </div>
-            <div class="spec-row-item">
-              <dt>产地</dt>
-              <dd>{{ data.goods.origin || '—' }}</dd>
-            </div>
-            <div class="spec-row-item">
-              <dt>分类</dt>
-              <dd>{{ data.goods.categoryName || '—' }}</dd>
-            </div>
-          </dl>
-        </section>
-      </div>
-
-      <!-- 配料 -->
-      <section class="info-block card ingredients-block" v-if="data.goods.ingredients">
-        <div class="block-head">
-          <h3 class="block-title">
-            <el-icon><Warning /></el-icon>配料表 · 过敏原提示
-          </h3>
-          <span class="block-tag">请过敏体质仔细查阅</span>
-        </div>
-        <div class="ingredients-text">{{ data.goods.ingredients }}</div>
-      </section>
-
-      <ProductReviews :reviews="data.reviews" />
+      <!-- 底部：分区导航（商品详情 / 规格参数 / 温馨提示 / 用户评价 / AI 问答） -->
+      <GoodsDetailTabs :key="String(route.params.id)" :goods="data.goods" />
     </template>
 
     <!-- 占位：未加载到 -->
@@ -252,12 +191,12 @@
 import { reactive, ref, watch, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import request from "@/utils/request";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import {
   ArrowRight, Goods, User, Timer, Star, StarFilled, ShoppingCart, ShoppingBag,
-  CircleCheck, Van, Medal, Document, InfoFilled, Warning, Cherry,
+  CircleCheck, Van, Medal, Cherry,
 } from "@element-plus/icons-vue";
-import ProductReviews from '@/components/product/ProductReviews.vue'
+import GoodsDetailTabs from '@/components/product/GoodsDetailTabs.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -273,7 +212,6 @@ const data = reactive({
   formVisible: false,
   form: {},
   addressList: [],
-  reviews: [],  // 公开商品评价
 })
 
 const rules = {
@@ -316,14 +254,6 @@ const loadFavoriteStatus = () => {
   })
 }
 
-const loadReviews = () => {
-  request.get('/reviews/goods/' + route.params.id).then(res => {
-    if (res.code === '200') {
-      data.reviews = res.data?.list || []
-    }
-  })
-}
-
 const toggleFav = (goodsId) => {
   if (data.favorited) {
     request.delete('/favorite/remove/' + goodsId).then(res => {
@@ -362,15 +292,21 @@ const save = () => {
         data.formVisible = false
         loadDetail()
       } else { ElMessage.error(res.msg) }
-    })
+    }).catch(error => handleBalanceError(error))
   })
+}
+
+const handleBalanceError = (error) => {
+  const msg = error.response?.data?.msg || ''
+  if (!msg.includes('余额不足')) return
+  ElMessageBox.confirm(`${msg}。是否前往“我的余额”充值？`, '余额不足', { confirmButtonText: '去充值', cancelButtonText: '暂不充值', type: 'warning' })
+    .then(() => router.push('/manager/person')).catch(() => {})
 }
 
 onMounted(() => {
   loadDetail()
   loadFavoriteStatus()
   loadAddress()
-  loadReviews()
 })
 
 watch(() => route.params.id, (newId) => {
@@ -380,23 +316,27 @@ watch(() => route.params.id, (newId) => {
     data.specList = []
     loadDetail()
     loadFavoriteStatus()
-    loadReviews()
   }
 })
 </script>
 
 <style scoped>
+/* 页面锁定一屏不滚动（经 .app-content 的 flex:1 拉伸撑满）：
+   上半购买区天然固定，滚动只发生在 Tab 分区容器内部 */
 .detail-page {
-  padding: 20px;
+  padding: 12px 16px;
   width: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  overflow: hidden;
 }
 
 /* —— 面包屑 —— */
 .breadcrumb-bar {
-  padding: 14px 20px;
+  padding: 8px 16px;
+  flex-shrink: 0;
 }
 
 .breadcrumb-bar :deep(.el-breadcrumb__item) {
@@ -428,26 +368,25 @@ watch(() => route.params.id, (newId) => {
 .detail-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-
-.detail-grid.two {
-  grid-template-columns: 1.4fr 1fr;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 @media (max-width: 960px) {
-  .detail-grid, .detail-grid.two { grid-template-columns: 1fr; }
+  .detail-grid { grid-template-columns: 1fr; }
+  /* 窄屏上部内容超一屏：恢复页面级滚动，配合 Tab 容器解除高度锁定 */
+  .detail-page { height: auto; overflow: visible; }
 }
 
 /* —— 图片区 —— */
 .gallery-card {
-  padding: 16px;
+  padding: 10px;
 }
 
 .main-image {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--c-bg-soft);
@@ -489,14 +428,14 @@ watch(() => route.params.id, (newId) => {
 
 /* —— 信息区 —— */
 .info-card {
-  padding: 24px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 
 .goods-title {
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--c-text-primary);
   margin: 0;
@@ -514,12 +453,12 @@ watch(() => route.params.id, (newId) => {
 .price-panel {
   background: linear-gradient(135deg, #fdf6e0 0%, #f7eed1 100%);
   border-radius: var(--r-md);
-  padding: 18px 20px;
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
 }
 
 .price-row {
@@ -540,9 +479,9 @@ watch(() => route.params.id, (newId) => {
   color: var(--c-primary);
 }
 
-.pv-symbol { font-size: 18px; font-weight: 600; }
+.pv-symbol { font-size: 14px; font-weight: 600; }
 .pv-num {
-  font-size: 32px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1;
   font-feature-settings: "tnum";
@@ -592,7 +531,7 @@ watch(() => route.params.id, (newId) => {
 }
 
 .spec-chip {
-  padding: 6px 16px;
+  padding: 4px 12px;
   border-radius: var(--r-pill);
   background: var(--c-bg-soft);
   color: var(--c-text-regular);
@@ -668,7 +607,7 @@ watch(() => route.params.id, (newId) => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
-  padding-top: 16px;
+  padding-top: 10px;
   border-top: 1px dashed var(--c-divider);
 }
 
@@ -683,14 +622,14 @@ watch(() => route.params.id, (newId) => {
 }
 
 .service-icon {
-  width: 32px; height: 32px;
+  width: 24px; height: 24px;
   background: var(--c-primary-soft);
   color: var(--c-primary);
-  border-radius: 8px;
+  border-radius: 7px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 14px;
   flex-shrink: 0;
 }
 
@@ -704,97 +643,6 @@ watch(() => route.params.id, (newId) => {
   font-size: 11px;
   color: var(--c-text-secondary);
   margin-top: 1px;
-}
-
-/* —— 详情块 —— */
-.info-block {
-  padding: 20px 24px;
-}
-
-.block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px dashed var(--c-divider);
-}
-
-.block-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--c-text-primary);
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.block-title .el-icon { color: var(--c-primary); }
-
-.block-tag {
-  font-size: 11px;
-  color: var(--c-warning);
-  background: var(--c-warning-soft);
-  padding: 2px 10px;
-  border-radius: var(--r-pill);
-  font-weight: 600;
-}
-
-.detail-text {
-  font-size: 14px;
-  line-height: 1.85;
-  color: var(--c-text-regular);
-  white-space: pre-wrap;
-}
-
-.detail-text p {
-  margin: 0 0 8px;
-}
-
-.empty-block {
-  font-size: 13px;
-  color: var(--c-text-secondary);
-  padding: 16px 0;
-  text-align: center;
-}
-
-/* —— 规格参数表 —— */
-.spec-table {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.spec-row-item {
-  display: flex;
-  padding: 12px 0;
-  border-bottom: 1px dashed var(--c-border-light);
-  font-size: 13px;
-}
-
-.spec-row-item:last-child { border-bottom: none; }
-
-.spec-row-item dt {
-  width: 90px;
-  color: var(--c-text-secondary);
-  font-weight: 500;
-  margin: 0;
-}
-
-.spec-row-item dd {
-  flex: 1;
-  color: var(--c-text-primary);
-  margin: 0;
-  line-height: 1.6;
-}
-
-/* —— 配料块 —— */
-.ingredients-block .ingredients-text {
-  font-size: 14px;
-  line-height: 1.8;
-  color: var(--c-text-regular);
 }
 
 /* —— 空态 —— */

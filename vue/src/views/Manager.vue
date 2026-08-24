@@ -51,15 +51,18 @@
             <div class="notif-panel">
               <div class="notif-head">
                 <span>订单通知</span>
-                <el-button v-if="notif.unread" link type="primary" size="small" @click="markAllRead">
-                  全部已读
-                </el-button>
+                <div v-if="notif.list.length" class="notif-actions">
+                  <el-button v-if="notif.unread" link type="primary" size="small" @click="markAllRead">
+                    全部已读
+                  </el-button>
+                  <el-button link type="danger" size="small" @click="clearAll">清空</el-button>
+                </div>
               </div>
               <div v-if="!notif.list.length" class="notif-empty">暂无通知</div>
               <div
                 v-for="n in notif.list" :key="n.id"
                 class="notif-item" :class="{ unread: !n.isRead }"
-                @click="router.push('/manager/orders')"
+                @click="markRead(n)"
               >
                 <div class="notif-title line1">{{ n.title }}</div>
                 <div class="notif-content line1">{{ n.content }}</div>
@@ -364,6 +367,34 @@ const markAllRead = () => {
   }).catch(() => {})
 }
 
+// 点击单条即已读：本地即时扣减角标，60s 轮询兜底纠偏；已读条目幂等跳过
+const markRead = (n) => {
+  if (!n.isRead) {
+    request.put(`/notification/${n.id}/read`).then(res => {
+      if (res.code === '200') {
+        n.isRead = true
+        notif.unread = Math.max(0, notif.unread - 1)
+      }
+    }).catch(() => {})
+  }
+  router.push('/manager/orders')
+}
+
+const clearAll = () => {
+  ElMessageBox.confirm('确定清空所有通知吗？', '清空通知', {
+    type: 'warning',
+    confirmButtonText: '清空',
+    cancelButtonText: '取消',
+  }).then(() => {
+    request.delete('/notification/clear').then(res => {
+      if (res.code === '200') {
+        notif.list = []
+        notif.unread = 0
+      }
+    }).catch(() => {})
+  }).catch(() => {})
+}
+
 let notifTimer = null
 onMounted(() => {
   loadUnreadCount()
@@ -493,6 +524,9 @@ const handleSearch = () => {
   border-bottom: 1px solid var(--c-border);
   font-weight: 600;
   font-size: 14px;
+}
+.notif-actions .el-button + .el-button {
+  margin-left: 8px;
 }
 .notif-empty {
   padding: 28px 0;

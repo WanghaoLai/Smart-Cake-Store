@@ -6,6 +6,7 @@ visible during review. Endpoint implementations belong in their own modules.
 
 from fastapi import APIRouter
 
+from .account import router as account_router
 from .address import router as address_router
 from .admin import router as admin_router
 from .auth import router as auth_router
@@ -23,13 +24,16 @@ from .ops import router as ops_router
 from .orders import router as orders_router
 from .region import router as region_router
 from .reviews import router as reviews_router
+from .qa import router as qa_router
 from .stats import router as stats_router
 from .user import router as user_router
+from .wallet import router as wallet_router
 
 
 api_router = APIRouter()
 
 for router in (
+    account_router,
     auth_router,
     address_router,
     admin_router,
@@ -47,8 +51,10 @@ for router in (
     orders_router,
     region_router,
     reviews_router,
+    qa_router,
     stats_router,
     user_router,
+    wallet_router,
 ):
     api_router.include_router(router)
 

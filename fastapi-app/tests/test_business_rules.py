@@ -42,7 +42,7 @@ class BusinessRulesTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await Tortoise.init(db_url="sqlite://:memory:", modules={"models": ["models"]})
         await Tortoise.generate_schemas()
-        await User.create(id=USER["user_id"], username="buyer", role="用户")
+        await User.create(id=USER["user_id"], username="buyer", role="用户", balance=Decimal("10000.00"))
         await User.create(id=99, username="other", role="用户")
         self.address = await Address.create(
             id=1, user_id=USER["user_id"], name="买家", phone="13800000000", address="测试地址",
