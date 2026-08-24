@@ -44,14 +44,11 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        // element-plus 内部组件存在循环引用，按组件拆 chunk 会打破模块初始化
+        // 顺序，触发 "Cannot access 'X' before initialization"；必须整体归入单 chunk
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined
-          if (id.includes('@element-plus/icons-vue')) return 'vendor-element-icons'
-          if (id.includes('element-plus/es/components/')) {
-            const component = id.split('element-plus/es/components/')[1]?.split('/')[0]
-            return component ? `element-${component}` : 'vendor-element'
-          }
-          if (id.includes('element-plus')) return 'vendor-element-core'
+          if (id.includes('element-plus') || id.includes('@element-plus')) return 'vendor-element'
           if (id.includes('marked') || id.includes('dompurify')) return 'vendor-markdown'
           if (id.includes('/vue/') || id.includes('vue-router')) return 'vendor-vue'
           if (id.includes('axios')) return 'vendor-http'
