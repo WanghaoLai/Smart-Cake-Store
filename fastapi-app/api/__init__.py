@@ -10,6 +10,7 @@ from .account import router as account_router
 from .address import router as address_router
 from .admin import router as admin_router
 from .auth import router as auth_router
+from .cart import router as cart_router
 from .category import router as category_router
 from .chat import router as chat_router
 from .favorite import router as favorite_router
@@ -37,6 +38,7 @@ for router in (
     auth_router,
     address_router,
     admin_router,
+    cart_router,
     category_router,
     chat_router,
     favorite_router,

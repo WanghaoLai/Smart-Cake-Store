@@ -92,12 +92,20 @@
               {{ data.favorited ? '已收藏' : '收藏' }}
             </el-button>
             <el-button
+              round
+              class="ghost-action"
+              :disabled="data.goods.num === 0"
+              @click="addToCart">
+              <el-icon style="margin-right: 4px"><ShoppingCart /></el-icon>
+              {{ data.goods.num === 0 ? '已售罄' : '加入购物车' }}
+            </el-button>
+            <el-button
               type="primary"
               round
               class="primary-action"
               :disabled="data.goods.num === 0"
               @click="reserveInit">
-              <el-icon style="margin-right: 4px"><ShoppingCart /></el-icon>
+              <el-icon style="margin-right: 4px"><ShoppingBag /></el-icon>
               {{ data.goods.num === 0 ? '已售罄' : '立即预订' }}
             </el-button>
           </div>
@@ -197,10 +205,12 @@ import {
   CircleCheck, Van, Medal, Cherry,
 } from "@element-plus/icons-vue";
 import GoodsDetailTabs from '@/components/product/GoodsDetailTabs.vue'
+import { useCartStore } from '@/stores/cart'
 
 const route = useRoute()
 const router = useRouter()
 const formRef = ref()
+const cartStore = useCartStore()
 
 const data = reactive({
   loading: false,
@@ -270,6 +280,12 @@ const toggleFav = (goodsId) => {
       } else { ElMessage.error(res.msg) }
     })
   }
+}
+
+const addToCart = async () => {
+  const res = await cartStore.addGoods(data.goods.id, data.qty)
+  if (res.code === '200') ElMessage.success(`已加入购物车（${data.qty}${data.goods.unit || '件'}）`)
+  else ElMessage.error(res.msg || '加入购物车失败')
 }
 
 const loadAddress = () => {

@@ -6,10 +6,12 @@
 **/.env
 **/.env.local
 **/.env.*.local
+.env.docker
 
 # 豁免：示例模板（公开，必须入库）
 !.env.example
 !**/.env.example
+!.env.docker.example
 
 # vue 环境配置：含部署地址，按本地文件管理不入库
 #vue/.env.development

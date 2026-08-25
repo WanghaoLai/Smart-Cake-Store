@@ -110,6 +110,8 @@ API 鉴权 → Grounding 确定性取证（MySQL + ChromaDB）
 
 ## 快速开始
 
+> Docker/Compose 部署（含 MySQL、Vue/Nginx、数据卷、Agent 配置、验证与排障）见 [Docker 部署指南](docs/docker-deployment.md)。
+
 最短路径：5 条命令 + 1 个启动脚本，约 10 分钟跑通。
 
 ```bash
