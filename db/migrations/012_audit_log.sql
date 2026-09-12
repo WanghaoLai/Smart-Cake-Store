@@ -1,4 +1,4 @@
-USE `cake_store`;
+-- Database is selected by migrate.sh; never switch to a hard-coded schema.
 SET NAMES utf8mb4;
 
 -- 操作审计：敏感操作（密码重置、账号增删、订单状态强制变更、知识库删除）

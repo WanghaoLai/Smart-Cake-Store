@@ -29,6 +29,7 @@ CORS_ORIGIN_REGEX = (
     if APP_ENV == "development"
     else None
 )
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "0") == "1"
 
 # ---- 数据库 ----
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -75,6 +76,9 @@ CHAT_RATE_WINDOW_SECONDS = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
 # 商品详情 AI 问答：问题更短但同样会触发一次模型调用。
 GOODS_QA_RATE_LIMIT = int(os.getenv("GOODS_QA_RATE_LIMIT", "10"))
 GOODS_QA_RATE_WINDOW_SECONDS = int(os.getenv("GOODS_QA_RATE_WINDOW_SECONDS", "60"))
+GOODS_SEARCH_RATE_LIMIT = int(os.getenv("GOODS_SEARCH_RATE_LIMIT", "30"))
+GOODS_SEARCH_RATE_WINDOW_SECONDS = int(os.getenv("GOODS_SEARCH_RATE_WINDOW_SECONDS", "60"))
+GOODS_SEARCH_MAX_CONCURRENCY = int(os.getenv("GOODS_SEARCH_MAX_CONCURRENCY", "4"))
 
 # 认证入口保护：账号维度防爆破，IP 维度防止攻击者轮换用户名。
 AUTH_RATE_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_WINDOW_SECONDS", "300"))

@@ -189,13 +189,15 @@
       </el-form>
       <template #footer>
         <el-button @click="data.formVisible = false" round>取消</el-button>
-        <el-button type="primary" @click="save" round>提交订单</el-button>
+        <el-button type="primary" @click="save" :loading="submitting" round>提交订单</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
+import { submitPurchase } from "@/utils/submitPurchase"
+import { parseSpecs } from "@/utils/purchase.mjs"
 import { reactive, ref, watch, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import request from "@/utils/request";
@@ -231,14 +233,6 @@ const rules = {
 
 const user = computed(() => JSON.parse(localStorage.getItem('system-user') || '{}'))
 
-const parseSpecs = (specsStr) => {
-  if (!specsStr) return []
-  return specsStr
-    .split(/[/／|、；,，\s]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
 const loadDetail = () => {
   data.loading = true
   request.get('/goods/detail/' + route.params.id).then(res => {
@@ -258,7 +252,7 @@ const loadDetail = () => {
 const loadFavoriteStatus = () => {
   request.get('/favorite/list').then(res => {
     if (res.code === '200') {
-      const list = res.data || []
+      const list = res.data?.list || []
       data.favorited = list.some(g => g.id === Number(route.params.id))
     }
   })
@@ -283,7 +277,7 @@ const toggleFav = (goodsId) => {
 }
 
 const addToCart = async () => {
-  const res = await cartStore.addGoods(data.goods.id, data.qty)
+  const res = await cartStore.addGoods(data.goods.id, data.qty, data.selectedSpec)
   if (res.code === '200') ElMessage.success(`已加入购物车（${data.qty}${data.goods.unit || '件'}）`)
   else ElMessage.error(res.msg || '加入购物车失败')
 }
@@ -295,20 +289,23 @@ const loadAddress = () => {
 }
 
 const reserveInit = () => {
-  data.form = { userId: user.value.id, goodsId: data.goods.id, num: data.qty }
+  data.form = { userId: user.value.id, goodsId: data.goods.id, num: data.qty, spec: data.selectedSpec }
   data.formVisible = true
 }
 
+const submitting = ref(false)
 const save = () => {
+  if (submitting.value) return
   formRef.value.validate(valid => {
-    if (!valid) return
-    request.post('/orders/add', data.form).then(res => {
+    if (!valid || submitting.value) return
+    submitting.value = true
+    submitPurchase('/orders/add', data.form).then(res => {
       if (res.code === '200') {
         ElMessage.success('预订成功，等待商家配送')
         data.formVisible = false
         loadDetail()
       } else { ElMessage.error(res.msg) }
-    }).catch(error => handleBalanceError(error))
+    }).catch(error => handleBalanceError(error)).finally(() => { submitting.value = false })
   })
 }
 

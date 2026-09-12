@@ -1,3 +1,4 @@
+import uuid
 """订单站内通知测试（SQLite 内存）。
 
 覆盖 roadmap 改进项 6 的核心不变量：
@@ -51,7 +52,7 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         await Tortoise.close_connections()
 
     async def _place_order(self, num: int = 1) -> Orders:
-        await order_add(OrdersCreatePydantic(goodsId=1, num=num, addressId=self.address.id), USER)
+        await order_add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, num=num, addressId=self.address.id), USER)
         return await Orders.all().order_by("-id").first()
 
     async def test_shipping_writes_notification_to_buyer(self):

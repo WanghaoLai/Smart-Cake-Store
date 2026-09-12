@@ -12,7 +12,7 @@ from common.exception_handler import CustomException, ForbiddenException, NotFou
 from common.pagination import clamp_page
 from common.rate_limit import SlidingWindowRateLimiter
 from common.result import PageInfo, Result
-from common.time import format_store_time
+from common.time import format_store_time, utc_now
 from models import Conversation, Message
 from settings import CHAT_RATE_LIMIT, CHAT_RATE_WINDOW_SECONDS
 
@@ -144,6 +144,7 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
                 data.message,
                 history_list[:-1],
                 user_id=current_user["user_id"],
+                owner_role=current_user["role"],
                 conversation_id=data.conversation_id,
             )
             full_response = invocation.answer
@@ -169,6 +170,7 @@ async def send_message(data: MessageRequest, current_user: dict = Depends(get_cu
             latency_ms=usage.latency_ms if usage else None,
             model=usage.model or None if usage else None,
         )
+        await Conversation.filter(id=data.conversation_id).update(updated_at=utc_now())
         if conversation.title == "新对话":
             title = data.message[:20] + "..." if len(data.message) > 20 else data.message
             await Conversation.filter(id=data.conversation_id).update(title=title)

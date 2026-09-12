@@ -60,8 +60,8 @@ def setup_exceptions(app: FastAPI):
 
     @app.exception_handler(RequestValidationError)
     async def validate_exception_handler(request: Request, exc: RequestValidationError):
-        # 完整错误列表进日志（含堆栈可定位），msg 只回首个错误避免响应过长
-        logger.warning("422 %s %s errors=%s", request.method, request.url.path, exc.errors())
+        # 只记录错误类型和字段位置，禁止记录 input、ctx 或可能包含凭据的 msg
+        logger.warning("422 %s %s errors=%s", request.method, request.url.path, [{"type": e.get("type"), "loc": e.get("loc")} for e in exc.errors()])
         return JSONResponse(
             status_code=422,
             content={"code": "422", "msg": _summarize_validation_error(exc)}

@@ -12,7 +12,7 @@ from agents.config import AgentProfile
 from agents.tools.product import rebuild_product_answer
 
 from .harness import AgentComponents, AgentContext
-from .grounding import format_grounding_message
+from .grounding import PRODUCT_TERMS, format_grounding_message
 
 
 logger = logging.getLogger(__name__)
@@ -147,8 +147,9 @@ class CustomerServiceAgent:
         history: list,
         user_id: int | None = None,
         conversation_id: int | None = None,
+        owner_role: str | None = None,
     ) -> str:
-        return (await self.invoke(user_message, history, user_id, conversation_id)).answer
+        return (await self.invoke(user_message, history, user_id, conversation_id, owner_role)).answer
 
     async def invoke(
         self,
@@ -156,6 +157,7 @@ class CustomerServiceAgent:
         history: list,
         user_id: int | None = None,
         conversation_id: int | None = None,
+        owner_role: str | None = None,
     ) -> AgentInvocation:
         """完整执行一次 Agent 调用，返回带 usage/latency 的快照。
 
@@ -165,13 +167,15 @@ class CustomerServiceAgent:
 
         harness = self.components.harness
         messages = harness.memory.build(history, user_message)
+        started = time.monotonic()
         grounding_sources: list[str] = []
-        evidence = await harness.grounding.collect(user_message, user_id, history)
+        evidence = await harness.grounding.collect(user_message, user_id if owner_role == "用户" else None, history)
         if evidence:
             grounding_sources = [item.source for item in evidence]
             messages.insert(-1, HumanMessage(content=format_grounding_message(evidence)))
         context = AgentContext(
             user_id=user_id,
+            owner_role=owner_role,
             conversation_id=conversation_id,
             user_message=user_message,
             recent_history=tuple(
@@ -190,7 +194,6 @@ class CustomerServiceAgent:
             },
             "recursion_limit": max(10, self.profile.max_model_calls * 3),
         }
-        started = time.monotonic()
         try:
             result = await self.runtime.ainvoke(
                 {"messages": messages},
@@ -223,7 +226,12 @@ class CustomerServiceAgent:
             )
             raise AgentUnavailableError("智能客服返回了空回答")
 
-        usage = _extract_usage(final_message)
+        usages = [_extract_usage(message) for message in output_messages if isinstance(message, AIMessage)]
+        usage = {
+            "prompt_tokens": sum(item["prompt_tokens"] for item in usages),
+            "completion_tokens": sum(item["completion_tokens"] for item in usages),
+            "model": next((item["model"] for item in reversed(usages) if item["model"]), ""),
+        }
         chain_names = " -> ".join(item["tool"] for item in tool_chain) or "none"
         logger.info(
             "agent tool_chain conversation_id=%s user_id=%s grounding=%s chain_len=%d chain=%s answer_chars=%d tokens=%d/%d latency_ms=%d",
@@ -234,7 +242,8 @@ class CustomerServiceAgent:
         if tool_chain:
             logger.debug("agent tool_chain_detail conversation_id=%s detail=%s", conversation_id, tool_chain)
 
-        if "MySQL实时商品" in grounding_sources:
+        current_product_intent = any(term in user_message.lower() for term in PRODUCT_TERMS)
+        if "MySQL实时商品" in grounding_sources and current_product_intent:
             try:
                 query = "\n".join([
                     *[
@@ -270,8 +279,9 @@ class CustomerServiceAgent:
         history: list,
         user_id: int | None = None,
         conversation_id: int | None = None,
+        owner_role: str | None = None,
     ) -> AsyncIterator[str]:
-        invocation = await self.invoke(user_message, history, user_id, conversation_id)
+        invocation = await self.invoke(user_message, history, user_id, conversation_id, owner_role)
         for index in range(0, len(invocation.answer), 24):
             yield invocation.answer[index:index + 24]
 

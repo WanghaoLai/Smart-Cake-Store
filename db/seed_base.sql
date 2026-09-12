@@ -5,10 +5,8 @@
 -- 自动导入；也可手动执行：
 --   mysql -u root -p --default-character-set=utf8mb4 cake_store < seed_base.sql
 --
--- 内容：
---   1. 演示账号：管理员 222/222、用户 234/234（bcrypt 预哈希）
---   2. 省市区三级区划参考数据（公共行政数据，地址级联依赖）
---   3. 商品分类（7 个）与首页公告
+-- 内容：商品分类、首页公告、省市区三级区划参考数据。
+-- 不包含登录账号；请使用 scripts/bootstrap_admin.py 创建管理员。
 --
 -- 不包含（按需另行执行）：
 --   - 商品演示数据：cd fastapi-app && python3 scripts/seed_goods.py
@@ -20,16 +18,7 @@
 SET NAMES utf8mb4;
 
 -- ----------------------------
--- 1. 演示账号（README 快速开始引用，密码即用户名）
--- ----------------------------
-INSERT IGNORE INTO `admin` (`id`, `username`, `password`, `name`, `role`, `must_change_password`) VALUES
-(1, '222', '$2b$12$rfj6TAsthdiU8ufcO1qvVOT27DlmyqtsbLwJEzSy6eMvngUmvmc0.', '演示管理员', '管理员', 1);
-
-INSERT IGNORE INTO `user` (`id`, `username`, `password`, `name`, `role`, `must_change_password`) VALUES
-(1, '234', '$2b$12$1l.HLJWA3WdbIE..Hokbo.6oSe0mfCweiDYr5UmNhX4wf4PZWaBxq', '演示用户', '用户', 1);
-
--- ----------------------------
--- 2. 商品分类（与 seed_goods.py 的分类编号一一对应）
+-- 1. 商品分类（与 seed_goods.py 的分类编号一一对应）
 -- ----------------------------
 INSERT IGNORE INTO `category` (`id`, `name`) VALUES
 (1, '情侣'),
@@ -41,13 +30,13 @@ INSERT IGNORE INTO `category` (`id`, `name`) VALUES
 (7, '宴席');
 
 -- ----------------------------
--- 3. 首页公告
+-- 2. 首页公告
 -- ----------------------------
 INSERT IGNORE INTO `notice` (`id`, `name`, `content`, `time`) VALUES
 (1, '智能商城导购与运营平台', '智能商城导购与运营平台Beta版今日已上线！', '2026-05-19 13:10:13');
 
 -- ----------------------------
--- 4. 省市区三级区划（公共行政参考数据，地址级联依赖）
+-- 3. 省市区三级区划（公共行政参考数据，地址级联依赖）
 -- tb_province 34 行 / tb_city 391 行 / tb_town 2955 行
 -- 注意：原始 dump 按表名字母序导出，tb_city 行先于 tb_province 行，
 -- 必须临时关闭外键检查，否则子表行会因父表尚空被 INSERT IGNORE 静默丢弃。

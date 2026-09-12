@@ -2,14 +2,16 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from tortoise.exceptions import IntegrityError
+from tortoise.expressions import F
+from tortoise.transactions import in_transaction
 
 from api.auth_schemas import LoginRequest, PasswordUpdateRequest, RegisterRequest
 from common.auth import (
+    async_hash_password,
+    async_verify_password,
     create_access_token,
     get_current_user,
-    hash_password,
     validate_password,
-    verify_password,
 )
 from common.exception_handler import CustomException
 from common.result import Result
@@ -20,6 +22,7 @@ from settings import (
     LOGIN_RATE_LIMIT_PER_ACCOUNT,
     LOGIN_RATE_LIMIT_PER_IP,
     REGISTER_RATE_LIMIT_PER_IP,
+    TRUST_PROXY_HEADERS,
 )
 
 
@@ -37,14 +40,17 @@ register_ip_limiter = SlidingWindowRateLimiter(
 
 
 def _client_ip(request: Request) -> str:
-    # 不盲信 X-Forwarded-For：只有在反向代理层明确覆盖该头时才应使用。
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        if forwarded:
+            return forwarded
     return request.client.host if request.client else "unknown"
 
 
 @router.post("/login")
 async def login(account: LoginRequest, request: Request):
     ip = _client_ip(request)
-    account_key = f"{ip}:{account.role}:{account.username.casefold()}"
+    account_key = f"{account.role}:{account.username.casefold()}"
     if not login_ip_limiter.allow(ip) or not login_account_limiter.allow(account_key):
         raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
     if account.role == "管理员":
@@ -56,7 +62,7 @@ async def login(account: LoginRequest, request: Request):
         # 不区分“账号不存在”与“密码错误”，避免用户名枚举。
         raise CustomException("账号或密码错误")
 
-    is_valid, needs_upgrade = verify_password(account.password, user.password)
+    is_valid, needs_upgrade = await async_verify_password(account.password, user.password)
     if not is_valid:
         raise CustomException("账号或密码错误")
 
@@ -64,7 +70,7 @@ async def login(account: LoginRequest, request: Request):
     login_account_limiter.reset(account_key)
 
     if needs_upgrade:
-        hashed = hash_password(account.password, enforce_policy=False)
+        hashed = await async_hash_password(account.password, enforce_policy=False)
         model = Admin if account.role == "管理员" else User
         await model.filter(id=user.id).update(password=hashed, must_change_password=True)
         user.must_change_password = True
@@ -96,7 +102,7 @@ async def register(account: RegisterRequest, request: Request):
     try:
         await User.create(
             username=account.username,
-            password=hash_password(account.password),
+            password=await async_hash_password(account.password),
             name=account.name or account.username,
             avatar=account.avatar,
             role="用户",
@@ -113,17 +119,19 @@ async def update_password(account: PasswordUpdateRequest, current_user: dict = D
     user_id = current_user["user_id"]
     role = current_user["role"]
     model = Admin if role == "管理员" else User
-    user = await model.get_or_none(id=user_id)
-    if user is None:
-        raise CustomException("未找到用户")
-    if not verify_password(account.password, user.password)[0]:
-        raise CustomException("原密码错误")
-    if verify_password(account.newPassword, user.password)[0]:
-        raise CustomException("新密码不能与原密码相同")
     validate_password(account.newPassword)
-    await model.filter(id=user_id).update(
-        password=hash_password(account.newPassword),
-        must_change_password=False,
-        token_version=int(getattr(user, "token_version", 0)) + 1,
-    )
+    new_hash = await async_hash_password(account.newPassword)
+    async with in_transaction() as connection:
+        user = await model.filter(id=user_id).using_db(connection).select_for_update().first()
+        if user is None:
+            raise CustomException("未找到用户")
+        if not (await async_verify_password(account.password, user.password))[0]:
+            raise CustomException("原密码错误")
+        if (await async_verify_password(account.newPassword, user.password))[0]:
+            raise CustomException("新密码不能与原密码相同")
+        await model.filter(id=user_id).using_db(connection).update(
+            password=new_hash,
+            must_change_password=False,
+            token_version=F("token_version") + 1,
+        )
     return Result.success()

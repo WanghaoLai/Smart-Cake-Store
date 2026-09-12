@@ -1,0 +1,145 @@
+name: smart-cake-store
+
+x-api-environment: &api-environment
+  APP_ENV: "${APP_ENV:-production}"
+  APP_TIMEZONE: "${APP_TIMEZONE:-Asia/Shanghai}"
+  CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8080}"
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_NAME: "${DB_NAME:-cake_store}"
+  DB_USER: "${DB_USER:-cake_app}"
+  DB_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env.docker}"
+  DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+  LLM_MODEL: "${LLM_MODEL:-qwen-turbo}"
+  LLM_BASE_URL: "${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+  LLM_TEMPERATURE: "${LLM_TEMPERATURE:-0.2}"
+  EMBEDDING_MODEL: "${EMBEDDING_MODEL:-text-embedding-v2}"
+  LLM_MAX_HISTORY: "${LLM_MAX_HISTORY:-20}"
+  RAG_TOP_K: "${RAG_TOP_K:-3}"
+  LLM_TIMEOUT_SECONDS: "${LLM_TIMEOUT_SECONDS:-45}"
+  LLM_MAX_RETRIES: "${LLM_MAX_RETRIES:-2}"
+  AGENT_MAX_MODEL_CALLS: "${AGENT_MAX_MODEL_CALLS:-4}"
+  AGENT_MAX_TOOL_CALLS: "${AGENT_MAX_TOOL_CALLS:-3}"
+  CHAT_RATE_LIMIT: "${CHAT_RATE_LIMIT:-20}"
+  CHAT_RATE_WINDOW_SECONDS: "${CHAT_RATE_WINDOW_SECONDS:-60}"
+  GOODS_QA_RATE_LIMIT: "${GOODS_QA_RATE_LIMIT:-10}"
+  GOODS_QA_RATE_WINDOW_SECONDS: "${GOODS_QA_RATE_WINDOW_SECONDS:-60}"
+  AUTH_RATE_WINDOW_SECONDS: "${AUTH_RATE_WINDOW_SECONDS:-300}"
+  LOGIN_RATE_LIMIT_PER_ACCOUNT: "${LOGIN_RATE_LIMIT_PER_ACCOUNT:-5}"
+  LOGIN_RATE_LIMIT_PER_IP: "${LOGIN_RATE_LIMIT_PER_IP:-30}"
+  REGISTER_RATE_LIMIT_PER_IP: "${REGISTER_RATE_LIMIT_PER_IP:-10}"
+  TRUST_PROXY_HEADERS: "1"
+  REVIEW_UPLOAD_RATE_LIMIT: "${REVIEW_UPLOAD_RATE_LIMIT:-20}"
+  REVIEW_UPLOAD_RATE_WINDOW_SECONDS: "${REVIEW_UPLOAD_RATE_WINDOW_SECONDS:-3600}"
+  REVIEW_UPLOAD_USER_QUOTA_BYTES: "${REVIEW_UPLOAD_USER_QUOTA_BYTES:-104857600}"
+  REVIEW_UPLOAD_GLOBAL_QUOTA_BYTES: "${REVIEW_UPLOAD_GLOBAL_QUOTA_BYTES:-1073741824}"
+  SEARCH_CANDIDATE_K: "${SEARCH_CANDIDATE_K:-20}"
+  SEARCH_TOP_K: "${SEARCH_TOP_K:-10}"
+  SEARCH_HEAT_WEIGHT: "${SEARCH_HEAT_WEIGHT:-0.15}"
+  RECOMMEND_W_FAVORITE: "${RECOMMEND_W_FAVORITE:-3.0}"
+  RECOMMEND_W_PURCHASE: "${RECOMMEND_W_PURCHASE:-2.0}"
+  RECOMMEND_W_RATING: "${RECOMMEND_W_RATING:-1.0}"
+  RECOMMEND_W_SALES: "${RECOMMEND_W_SALES:-0.5}"
+  WALLET_RECHARGE_MODE: "${WALLET_RECHARGE_MODE:-disabled}"
+  JWT_SECRET_KEY: "${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env.docker}"
+  JWT_ALGORITHM: "${JWT_ALGORITHM:-HS256}"
+  JWT_EXPIRE_HOURS: "${JWT_EXPIRE_HOURS:-2}"
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: "${DB_NAME:-cake_store}"
+      MYSQL_USER: "${DB_USER:-cake_app}"
+      MYSQL_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env.docker}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env.docker}"
+      TZ: "${APP_TIMEZONE:-Asia/Shanghai}"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - backend
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  migrate:
+    image: smart-cake-store-migrator:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    environment: *api-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - backend
+    logging: *default-logging
+
+  api:
+    image: smart-cake-store-api:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - app_files:/app/files
+      - chroma_data:/app/chroma_db
+    ports:
+      - "127.0.0.1:${API_PORT:-9090}:9090"
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - backend
+    logging: *default-logging
+
+  web:
+    image: smart-cake-store-web:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_BASE_URL: /api
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+    logging: *default-logging
+
+volumes:
+  mysql_data:
+  app_files:
+  chroma_data:
+
+networks:
+  backend:
+    driver: bridge

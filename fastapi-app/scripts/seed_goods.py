@@ -9,6 +9,7 @@
 用法：cd fastapi-app && python3 scripts/seed_goods.py
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv(APP_DIR / ".env")
 
 from tortoise import Tortoise
-from settings import TORTOISE_ORM
+from settings import APP_ENV, TORTOISE_ORM
 from models import Goods, Category
 
 # 每个分类内可用图片循环使用（与 fastapi-app/files/goods/ 下实际文件一一对应）
@@ -349,6 +350,8 @@ GOODS = [
 
 async def upsert_goods():
     """带 id 的记录按 id UPDATE 现有；不带 id 的按 name UPSERT。整体幂等。"""
+    if APP_ENV != "development" or os.getenv("ALLOW_DEMO_SEED") != "1":
+        raise SystemExit("演示商品只允许 APP_ENV=development 且 ALLOW_DEMO_SEED=1 时写入")
     await Tortoise.init(config=TORTOISE_ORM)
 
     categories = await Category.all()
@@ -357,6 +360,7 @@ async def upsert_goods():
 
     inserted = 0
     updated = 0
+    skipped = 0
     img_counter = {}
 
     for entry in GOODS:
@@ -389,15 +393,13 @@ async def upsert_goods():
             existing = await Goods.filter(name=entry['name']).first()
 
         if existing:
-            for k, v in fields.items():
-                setattr(existing, k, v)
-            await existing.save()
-            updated += 1
+            # 已存在记录可能是真实运营数据；填充脚本不得覆盖价格和库存。
+            skipped += 1
         else:
             await Goods.create(**fields)
             inserted += 1
 
-    print(f"\n✅ 完成：新增 {inserted} 个，更新 {updated} 个")
+    print(f"\n✅ 完成：新增 {inserted} 个，跳过已有 {skipped} 个")
 
     from tortoise.functions import Count
     stats = await Goods.annotate(count=Count('id')).group_by('category_id').values('category_id', 'count')

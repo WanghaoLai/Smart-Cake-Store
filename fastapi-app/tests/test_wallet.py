@@ -1,3 +1,4 @@
+import uuid
 import unittest
 from decimal import Decimal
 
@@ -33,13 +34,13 @@ class WalletTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_insufficient_balance_does_not_change_stock(self):
         with self.assertRaises(CustomException):
-            await order_add(OrdersCreatePydantic(goodsId=1, addressId=self.address.id, num=1), USER)
+            await order_add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, addressId=self.address.id, num=1), USER)
         self.assertEqual((await Goods.get(id=1)).num, 5)
         self.assertEqual(await Orders.all().count(), 0)
 
     async def test_payment_and_cancel_refund_are_atomic(self):
         await recharge(RechargeRequest(amount=Decimal("100.00"), payment_method="wechat", request_id="wallet_request_0002"), USER)
-        await order_add(OrdersCreatePydantic(goodsId=1, addressId=self.address.id, num=1), USER)
+        await order_add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, addressId=self.address.id, num=1), USER)
         order = await Orders.all().first()
         self.assertEqual((await User.get(id=7)).balance, Decimal("40.00"))
         await update_status(order.id, ORDER_CANCELLED, USER)

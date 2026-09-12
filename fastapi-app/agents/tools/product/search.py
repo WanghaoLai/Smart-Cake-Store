@@ -168,6 +168,7 @@ async def search_products(
     query: str,
     limit: int = 8,
     in_stock_only: bool = False,
+    max_price: float | None = None,
 ) -> tuple[list[dict], int]:
     """Load bounded candidate pool from MySQL, attach _relevance + category_id.
 
@@ -175,11 +176,15 @@ async def search_products(
     recommend_cake) combine text score with personalization without
     recomputing it.
     """
-    rows = await Goods.all().limit(200).values(
+    queryset = Goods.all()
+    if in_stock_only:
+        queryset = queryset.filter(num__gt=0)
+    if max_price is not None:
+        queryset = queryset.filter(price__lte=max_price)
+    total = await queryset.count()
+    rows = await queryset.values(
         "id", "name", "price", "num", "unit", "description", "category_id"
     )
-    if in_stock_only:
-        rows = [row for row in rows if row["num"] > 0]
     for row in rows:
         row["_relevance"] = _relevance(query, f"{row['name']} {row.get('description') or ''}")
     ranked = sorted(
@@ -187,7 +192,7 @@ async def search_products(
         key=lambda row: (row["_relevance"], row["num"] > 0, -row["id"]),
         reverse=True,
     )[:limit]
-    return ranked, len(rows)
+    return ranked, total
 
 
 async def get_product_facts(query: str, limit: int = 8) -> str:
@@ -235,10 +240,8 @@ async def recommend_cake(
         query.search_text(),
         limit=20,
         in_stock_only=query.in_stock_only,
+        max_price=query.max_price,
     )
-
-    if query.max_price is not None:
-        candidates = [row for row in candidates if (row.get("price") or 0) <= query.max_price]
 
     profile = await _load_user_profile(user_id)
     for row in candidates:

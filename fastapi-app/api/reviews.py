@@ -1,10 +1,12 @@
 """商品评价：用户提交（文本+多图+星级），公开浏览，管理员回复。"""
 import json
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import create_model, Field
 from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.functions import Avg
 from tortoise.transactions import in_transaction
 
 from common.auth import get_current_admin, get_current_customer, get_current_user
@@ -33,8 +35,10 @@ ReviewCreatePydantic = create_model(
 # 管理员回复模型
 ReviewReplyPydantic = create_model(
     "ReviewReplyPydantic",
-    reply=(str, Field(..., min_length=1)),
+    reply=(str, Field(..., min_length=1, max_length=1000)),
 )
+
+REVIEW_IMAGE_RE = re.compile(r"^files/download/review/user_(\d+)_[a-f0-9]{32}\.(?:jpg|jpeg|png|gif|webp)$")
 
 
 def _parse_images(raw: Optional[str]) -> list:
@@ -119,6 +123,14 @@ async def add(review_pydantic: ReviewCreatePydantic, current_user: dict = Depend
                 raise CustomException("images 必须是 URL 数组的 JSON 字符串")
             if not isinstance(parsed, list) or len(parsed) > 9:
                 raise CustomException("评价图片最多 9 张")
+            if len(images) > 3000:
+                raise CustomException("评价图片数据过长")
+            for image in parsed:
+                if not isinstance(image, str) or len(image) > 255:
+                    raise CustomException("评价图片地址格式不正确")
+                match = REVIEW_IMAGE_RE.fullmatch(image)
+                if not match or int(match.group(1)) != current_user["user_id"]:
+                    raise CustomException("评价图片必须是当前用户上传的文件")
 
         await Review.create(
             goods_id=goods_id,
@@ -143,7 +155,11 @@ async def list_by_goods(goods_id: int, pageNum: int = 1, pageSize: int = 20):
     query = Review.filter(goods_id=goods_id).prefetch_related('user', 'goods').order_by('-id')
     total = await query.count()
     reviews = await query.offset((pageNum - 1) * pageSize).limit(pageSize)
-    return Result.success(PageInfo(total=total, list=[_to_dict(r) for r in reviews]))
+    aggregate = await Review.filter(goods_id=goods_id).annotate(value=Avg("rating")).values("value")
+    average = aggregate[0]["value"] if aggregate else 0
+    result = PageInfo(total=total, list=[_to_dict(r) for r in reviews]).model_dump()
+    result["averageRating"] = round(float(average), 2)
+    return Result.success(result)
 
 
 @router.put("/reply/{review_id}", dependencies=[Depends(get_current_admin)])

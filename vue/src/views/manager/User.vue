@@ -172,6 +172,7 @@ const handleResetPwd = (row) => {
 }
 
 const doResetPwd = () => {
+  if (data.resetting) return
   if (!data.pwdForm.newPassword) {
     ElMessage.error('请输入新密码')
     return
@@ -182,12 +183,11 @@ const doResetPwd = () => {
   }
   data.resetting = true
   request.put('/user/reset-password/' + data.pwdTarget.id, { password: data.pwdForm.newPassword }).then(res => {
-    data.resetting = false
     if (res.code === '200') {
       ElMessage.success('密码已重置，该用户下次登录需修改密码')
       data.pwdVisible = false
     } else { ElMessage.error(res.msg) }
-  })
+  }).catch(() => {}).finally(() => { data.resetting = false })
 }
 
 const add = () => {

@@ -32,6 +32,7 @@
             <img :src="$fileUrl(item.goodsImg)" class="goods-img" @click="goDetail(item.goodsId)" />
             <div class="goods-info">
               <div class="goods-name line2" @click="goDetail(item.goodsId)">{{ item.goodsName }}</div>
+              <div v-if="item.spec">规格：{{ item.spec }}</div>
               <el-tag v-if="item.stock === 0" type="danger" size="small" effect="light" round>已售罄</el-tag>
               <el-tag v-else-if="item.num > item.stock" type="warning" size="small" effect="light" round>
                 库存仅剩 {{ item.stock }} {{ item.goodsUnit }}
@@ -105,7 +106,7 @@
         </el-form-item>
         <div class="checkout-summary">
           <div v-for="i in cart.selectedItems" :key="i.id" class="summary-row">
-            <span class="line1">{{ i.goodsName }} × {{ i.num }}</span>
+            <span class="line1">{{ i.goodsName }} {{ i.spec }} × {{ i.num }}</span>
             <span>¥{{ (Number(i.goodsPrice) * i.num).toFixed(2) }}</span>
           </div>
           <div class="summary-row total">
@@ -144,9 +145,11 @@ const goDetail = (goodsId) => router.push('/manager/cake/' + goodsId)
 
 const onNumChange = async (item) => {
   if (item.num < 1) return
-  const res = await cart.updateNum(item)
-  if (res.code !== '200') {
-    ElMessage.error(res.msg || '修改数量失败')
+  try {
+    const res = await cart.updateNum(item)
+    if (res.code !== '200') throw new Error(res.msg || '修改数量失败')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || error.message || '修改数量失败')
     await cart.loadCart()
   }
 }

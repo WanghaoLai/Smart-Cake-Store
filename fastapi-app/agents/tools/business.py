@@ -1,6 +1,7 @@
 """LangChain tools for authenticated smart-mall business operations."""
 
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -39,32 +40,13 @@ class CancelOrderArguments(OrderQuery):
         return self
 
 
-_CANCEL_WORDS = ("取消", "撤销", "退订", "不要了", "cancel")
-_CONFIRM_WORDS = ("确认", "确定", "是的", "好的", "可以", "同意", "yes")
-_REJECT_CANCEL_PHRASES = ("不要取消", "不取消", "别取消", "暂不取消", "取消操作算了")
-
-
 def _has_confirmed_cancel(context: AgentContext, order_id: int | None, order_no: str | None) -> bool:
-    """Validate cancellation intent against trusted current input and recent dialogue."""
-    current_message = context.user_message.strip().lower()
-    if any(phrase in current_message for phrase in _REJECT_CANCEL_PHRASES):
-        return False
-    if any(word in current_message for word in _CANCEL_WORDS):
-        return True
-    if not any(word in current_message for word in _CONFIRM_WORDS):
-        return False
-
+    # Only a complete explicit command from the current trusted user input grants authority.
+    # Assistant/model text and vague affirmations never grant permission to mutate an order.
     identifier = str(order_id if order_id is not None else order_no)
-    for role, content in reversed(context.recent_history):
-        if role != "assistant":
-            continue
-        normalized = content.lower()
-        return (
-            any(word in normalized for word in _CANCEL_WORDS)
-            and identifier in normalized
-            and any(word in normalized for word in ("确认", "确定", "是否", "要取消"))
-        )
-    return False
+    label = r"订单(?:ID|id)" if order_id is not None else r"订单(?:号)?"
+    pattern = rf"(?:请|帮我)?(?:确认)?取消\s*{label}\s*[:：#]?\s*{re.escape(identifier)}[。！!]?"
+    return re.fullmatch(pattern, context.user_message.strip()) is not None
 
 
 class RecommendationArguments(BaseModel):
@@ -91,7 +73,7 @@ def business_tools() -> list[BaseTool]:
         runtime: ToolRuntime[AgentContext] = None,
     ) -> str:
         """查询当前登录用户的订单；不传订单标识时返回最近订单。"""
-        if runtime.context.user_id is None:
+        if runtime.context.user_id is None or runtime.context.owner_role != "用户":
             return "当前登录身份无效，无法访问订单数据。"
         try:
             return await get_order_status(
@@ -112,14 +94,14 @@ def business_tools() -> list[BaseTool]:
         """将当前用户明确要求取消的订单标记为已取消，并原子恢复商品库存。
 
         必须提供且只提供 order_id 或 order_no。订单标识可以来自当前消息，也可以
-        来自最近对话中已明确的唯一订单。用户直接说取消，或对包含同一订单标识的
-        取消确认问题作肯定答复后调用；订单不明确时不要猜测，应先查询或询问。
+        来自最近对话中已明确的唯一订单。要求用户输入完整指令“确认取消订单号 XXX”（数据库 ID 则为“确认取消订单ID XXX”）。
+        疑问、含糊确认与历史助手消息均不授权取消；订单不明确时应先查询。
         """
         context = runtime.context
-        if context.user_id is None:
+        if context.user_id is None or context.owner_role != "用户":
             return "当前登录身份无效，无法取消订单。"
         if not _has_confirmed_cancel(context, order_id, order_no):
-            return "安全校验未通过：用户尚未明确确认取消该订单。"
+            return "安全校验未通过：用户尚未明确确认取消该订单。请发送“确认取消订单号 <完整订单号>”。"
         try:
             return await cancel_order(
                 user_id=context.user_id,
@@ -148,7 +130,7 @@ def business_tools() -> list[BaseTool]:
                 max_price=max_price,
                 in_stock_only=in_stock_only,
             )
-            user_id = runtime.context.user_id if runtime and runtime.context else None
+            user_id = runtime.context.user_id if runtime and runtime.context and runtime.context.owner_role == "用户" else None
             return await recommend_cake(query, user_id=user_id)
         except Exception:
             logger.exception("recommend_cake tool failed")

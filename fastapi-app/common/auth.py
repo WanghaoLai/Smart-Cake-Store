@@ -1,4 +1,5 @@
 """JWT 认证与密码哈希模块"""
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -19,6 +20,10 @@ MIN_PASSWORD_CHARS = 8
 COMMON_PASSWORDS = {
     "12345678", "password", "password1", "qwerty123", "admin123", "11111111",
 }
+
+# bcrypt 故意消耗 CPU。Web 请求只能通过下面两个 async 包装器调用，并发数
+# 受限，避免瞬时登录/注册流量占满默认线程池；同步函数保留给离线脚本使用。
+_bcrypt_slots = asyncio.Semaphore(4)
 
 
 def validate_password(plaintext: str) -> None:
@@ -65,6 +70,18 @@ def verify_password(plaintext: str, stored: str) -> tuple:
         return True, True
 
     return False, False
+
+
+async def async_hash_password(plaintext: str, *, enforce_policy: bool = True) -> str:
+    async with _bcrypt_slots:
+        return await asyncio.to_thread(
+            hash_password, plaintext, enforce_policy=enforce_policy,
+        )
+
+
+async def async_verify_password(plaintext: str, stored: str) -> tuple[bool, bool]:
+    async with _bcrypt_slots:
+        return await asyncio.to_thread(verify_password, plaintext, stored)
 
 
 def create_access_token(user: dict) -> str:

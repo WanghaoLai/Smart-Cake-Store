@@ -28,6 +28,7 @@
             <el-icon><Delete /></el-icon>
           </button>
         </div>
+        <el-button v-if="data.conversations.length < data.conversationTotal" text @click="loadMoreConversations">加载更多会话</el-button>
         <div v-if="!data.conversations.length" class="conv-empty">
           <el-icon :size="40"><ChatDotRound /></el-icon>
           <p>暂无会话</p>
@@ -57,12 +58,13 @@
 
       <!-- 消息区 -->
       <div class="messages-container" ref="messagesContainer">
+        <el-button v-if="data.messages.length < data.messageTotal" text @click="loadOlderMessages">加载更早消息</el-button>
         <div v-if="data.currentConversation && data.messages.length === 0 && !data.loading" class="empty-state">
           <el-icon :size="56" color="#c0c4cc"><ChatDotRound /></el-icon>
           <p>开始与智能客服对话吧！</p>
         </div>
 
-        <div v-for="(msg, index) in data.messages" :key="index" :class="['message-row', msg.role]">
+        <div v-for="(msg, index) in data.messages" :key="msg.id || msg.clientId || index" :class="['message-row', msg.role]">
           <div class="message-avatar">
             <el-avatar v-if="msg.role === 'user'" :size="36" :src="$fileUrl(data.user.avatar) || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
             <div v-else class="bot-avatar">
@@ -115,7 +117,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, nextTick, onMounted } from 'vue'
+import { reactive, ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { Plus, Delete, ChatDotRound, ChatLineRound, MagicStick, Promotion, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
@@ -139,10 +141,15 @@ const data = reactive({
   messages: [],
   inputMessage: '',
   loading: false,
-  status: '正在连接智能客服…'
+  status: '正在连接智能客服…',
+  conversationPage: 1,
+  conversationTotal: 0,
+  messagePage: 1,
+  messageTotal: 0,
 })
 
 let conversationCreation = null
+let activeStream = null
 
 const renderMarkdown = (text) => DOMPurify.sanitize(marked.parse(text || ''))
 
@@ -165,12 +172,18 @@ const scrollToBottom = () => {
   })
 }
 
-const loadConversations = async () => {
+const loadConversations = async (append = false) => {
   try {
-    const res = await request.get('/chat/conversations')
-    if (res.code === '200') data.conversations = res.data?.list || []
+    const pageNum = append ? data.conversationPage + 1 : 1
+    const res = await request.get('/chat/conversations', { params: { pageNum, pageSize: 20 } })
+    if (res.code === '200') {
+      data.conversations = append ? [...data.conversations, ...(res.data?.list || [])] : (res.data?.list || [])
+      data.conversationPage = pageNum
+      data.conversationTotal = res.data?.total || 0
+    }
   } catch (e) { console.error('加载会话列表失败:', e) }
 }
+const loadMoreConversations = () => loadConversations(true)
 
 const createConversation = async (silent = false) => {
   // 页面初始化和用户首次发送可能同时触发创建，共享同一个请求以避免重复会话。
@@ -202,14 +215,30 @@ const createConversation = async (silent = false) => {
 }
 
 const switchConversation = async (conversationId) => {
+  activeStream?.abort()
+  activeStream = null
+  data.loading = false
   data.currentConversation = conversationId
+  data.messagePage = 1
   try {
-    const res = await request.get(`/chat/messages/${conversationId}`)
-    if (res.code === '200') {
+    const res = await request.get(`/chat/messages/${conversationId}`, { params: { pageNum: 1, pageSize: 50 } })
+    if (data.currentConversation === conversationId && res.code === '200') {
       data.messages = res.data?.list || []
+      data.messageTotal = res.data?.total || 0
       scrollToBottom()
     }
   } catch (e) { ElMessage.error('加载消息失败') }
+}
+
+const loadOlderMessages = async () => {
+  const conversationId = data.currentConversation
+  const pageNum = data.messagePage + 1
+  const res = await request.get(`/chat/messages/${conversationId}`, { params: { pageNum, pageSize: 50 } })
+  if (data.currentConversation === conversationId && res.code === '200') {
+    data.messages = [...(res.data?.list || []), ...data.messages]
+    data.messagePage = pageNum
+    data.messageTotal = res.data?.total || 0
+  }
 }
 
 const deleteConversation = async (conversationId) => {
@@ -256,34 +285,47 @@ const sendMessage = async () => {
   const userMessage = data.inputMessage.trim()
   data.inputMessage = ''
 
-  data.messages.push({ role: 'user', content: userMessage })
+  const requestConversation = data.currentConversation
+  const clientBase = `${requestConversation}-${Date.now()}`
+  data.messages.push({ role: 'user', content: userMessage, clientId: `${clientBase}-user` })
   scrollToBottom()
 
   data.loading = true
   data.status = '正在连接智能客服…'
-  data.messages.push({ role: 'assistant', content: '' })
+  const assistantMessage = { role: 'assistant', content: '', clientId: `${clientBase}-assistant` }
+  data.messages.push(assistantMessage)
+  const controller = new AbortController()
+  activeStream = controller
 
   try {
     const { agentFailed } = await streamChat({
-      conversationId: data.currentConversation,
+      conversationId: requestConversation,
       message: userMessage,
-      onStatus: status => { data.status = status },
+      signal: controller.signal,
+      onStatus: status => { if (data.currentConversation === requestConversation) data.status = status },
       onContent: content => {
-        const lastMsg = data.messages[data.messages.length - 1]
-        if (lastMsg?.role === 'assistant') lastMsg.content = content
-        scrollToBottom()
+        if (data.currentConversation === requestConversation && data.messages.includes(assistantMessage)) {
+          assistantMessage.content = content
+          scrollToBottom()
+        }
       },
     })
     if (agentFailed) ElMessage.warning('智能客服暂时不可用，请稍后重试')
     await loadConversations()
   } catch (e) {
-    const lastMsg = data.messages[data.messages.length - 1]
-    if (lastMsg?.role === 'assistant' && !lastMsg.content) data.messages.pop()
-    ElMessage.error(e?.message || '发送消息失败')
-    console.error(e)
+    if (data.currentConversation === requestConversation && !assistantMessage.content) {
+      data.messages = data.messages.filter(message => message !== assistantMessage)
+    }
+    if (e?.name !== 'AbortError') {
+      ElMessage.error(e?.message || '发送消息失败')
+      console.error(e)
+    }
   } finally {
-    data.loading = false
-    scrollToBottom()
+    if (activeStream === controller) {
+      activeStream = null
+      data.loading = false
+      scrollToBottom()
+    }
   }
 }
 
@@ -298,6 +340,7 @@ onMounted(async () => {
     await createConversation(true)
   }
 })
+onUnmounted(() => activeStream?.abort())
 </script>
 
 <style scoped>

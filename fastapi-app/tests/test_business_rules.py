@@ -1,3 +1,4 @@
+import uuid
 """业务写路径集成测试（带真实数据库，SQLite 内存）。
 
 覆盖审查报告指出的最有价值业务不变量：
@@ -58,7 +59,7 @@ class BusinessRulesTests(unittest.IsolatedAsyncioTestCase):
         await Tortoise.close_connections()
 
     async def _place_order(self, num: int = 1) -> int:
-        payload = OrdersCreatePydantic(goodsId=1, addressId=self.address.id, num=num)
+        payload = OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, addressId=self.address.id, num=num)
         await order_add(payload, USER)
         order = await Orders.all().order_by("-id").first()
         return order.id
@@ -73,17 +74,17 @@ class BusinessRulesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_order_rejects_oversell_and_missing_goods(self):
         with self.assertRaises(CustomException):
-            await order_add(OrdersCreatePydantic(goodsId=1, addressId=self.address.id, num=11), USER)
+            await order_add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, addressId=self.address.id, num=11), USER)
         with self.assertRaises(CustomException):
-            await order_add(OrdersCreatePydantic(goodsId=999, addressId=self.address.id, num=1), USER)
+            await order_add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=999, addressId=self.address.id, num=1), USER)
         self.assertEqual((await Goods.get(id=1)).num, 10, "失败的下单不得扣库存")
 
     async def test_order_requires_address_owned_by_current_customer(self):
         with self.assertRaises(CustomException):
-            await order_add(OrdersCreatePydantic(goodsId=1, num=1), USER)
+            await order_add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, num=1), USER)
         with self.assertRaises(CustomException):
             await order_add(
-                OrdersCreatePydantic(goodsId=1, addressId=self.other_address.id, num=1),
+                OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=1, addressId=self.other_address.id, num=1),
                 USER,
             )
         self.assertEqual(await Orders.all().count(), 0)
@@ -105,9 +106,8 @@ class BusinessRulesTests(unittest.IsolatedAsyncioTestCase):
         order_id = await self._place_order(num=2)
         await order_update_status(order_id, ORDER_CANCELLED, USER)
         self.assertEqual((await Goods.get(id=1)).num, 10, "取消必须回补库存")
-        # 已取消是终态：再次流转被拒 → 不可能二次回补
-        with self.assertRaises(CustomException):
-            await order_update_status(order_id, ORDER_CANCELLED, USER)
+        # 所有取消入口幂等成功，库存和退款只执行一次
+        await order_update_status(order_id, ORDER_CANCELLED, USER)
         self.assertEqual((await Goods.get(id=1)).num, 10, "终态拦截保证无二次回补")
 
     async def test_legacy_delete_cancels_without_erasing_audit_record(self):

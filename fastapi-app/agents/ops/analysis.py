@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from models import Goods, Orders, Review
-from common.time import format_store_time, utc_now
+from common.time import STORE_TIMEZONE, format_store_time, utc_now
 from pypika_tortoise.functions import Date as SqlDate
 from tortoise.functions import Count, Function, Sum
 
@@ -68,9 +68,23 @@ def _since(days: int) -> datetime:
     return utc_now() - timedelta(days=days)
 
 
+def _sales_window(days: int, now: datetime | None = None) -> tuple[datetime, datetime, datetime]:
+    """Return current start/end and previous start using store-local calendar days."""
+    end = now or utc_now()
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    local_today = end.astimezone(STORE_TIMEZONE).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = (local_today - timedelta(days=days - 1)).astimezone(timezone.utc)
+    previous_start = start - (end - start)
+    return start, end, previous_start
+
+
 async def _load_sales_snapshot(goods_id: int | None, days: int) -> dict:
     """Load one reusable SQL-aggregated order snapshot for an analysis request."""
-    current_query = Orders.filter(time__gte=_since(days), status__not="已取消")
+    current_start, current_end, previous_start = _sales_window(days)
+    current_query = Orders.filter(
+        time__gte=current_start, time__lt=current_end, status__not="已取消",
+    )
     current_job = (
         current_query.annotate(
             order_count=Count("id"), total_qty=Sum("num"), total_revenue=Sum("total_price"),
@@ -84,18 +98,15 @@ async def _load_sales_snapshot(goods_id: int | None, days: int) -> dict:
             (
                 Orders.filter(
                     goods_id=goods_id,
-                    time__gte=_since(days * 2),
-                    time__lt=_since(days),
+                    time__gte=previous_start,
+                    time__lt=current_start,
                     status__not="已取消",
                 )
                 .annotate(total_qty=Sum("num"))
                 .values("total_qty")
             ),
             (
-                current_query.filter(goods_id=goods_id)
-                .annotate(day=DateOnly("time"), total_qty=Sum("num"))
-                .group_by("day")
-                .values("day", "total_qty")
+                current_query.filter(goods_id=goods_id).values("time", "num")
             ),
         ])
     values = await asyncio.gather(*jobs)
@@ -107,6 +118,8 @@ async def _load_sales_snapshot(goods_id: int | None, days: int) -> dict:
         "sales": {row["goods_id"]: row for row in aggregates if row["goods_id"] is not None},
         "previous_qty": int((values[2][0].get("total_qty") or 0) if goods_id is not None and values[2] else 0),
         "daily": values[3] if goods_id is not None else [],
+        "current_start": current_start,
+        "current_end": current_end,
     }
 
 
@@ -184,12 +197,15 @@ def _sales_from_snapshot(snapshot: dict, goods_id: int | None) -> dict:
         row = sales_by_goods.get(goods_id, {})
         qty = int(row.get("total_qty") or 0)
         revenue = Decimal(row.get("total_revenue") or 0)
-        trend_counter = {
-            item["day"].isoformat() if hasattr(item["day"], "isoformat") else str(item["day"])[:10]:
-            int(item.get("total_qty") or 0)
-            for item in snapshot["daily"] if item.get("day")
-        }
-        today = datetime.now(timezone.utc).date()
+        trend_counter = Counter()
+        for item in snapshot["daily"]:
+            value = item.get("time")
+            if value is None:
+                continue
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            trend_counter[value.astimezone(STORE_TIMEZONE).date().isoformat()] += int(item.get("num") or 0)
+        today = snapshot["current_end"].astimezone(STORE_TIMEZONE).date()
         trend = []
         for offset in range(days - 1, -1, -1):
             day = (today - timedelta(days=offset)).isoformat()
@@ -318,6 +334,8 @@ def _inventory_from_snapshot(snapshot: dict) -> dict:
 
     return {
         "days": days,
+        # 当前模型没有采购成本；该值只能解释为库存按当前零售价的估值。
+        "valuation_basis": "retail_price",
         "total_goods": len(all_goods),
         "levels": {k: level_counter.get(k, 0) for k in ("健康", "偏低", "紧张", "售罄")},
         "total_inventory_value": round(sum(i["inventory_value"] for i in items), 2),

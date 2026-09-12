@@ -1,4 +1,4 @@
-USE `cake_store`;
+-- Database is selected by migrate.sh; never switch to a hard-coded schema.
 SET NAMES utf8mb4;
 
 -- 订单站内通知：状态变更（发货/取消）在业务事务内同步写行——

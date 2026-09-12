@@ -18,6 +18,7 @@ INDEX_TASK_LEASE_SECONDS = 300
 class IndexTaskService:
     def __init__(self, vector_store: KnowledgeService):
         self.vector_store = vector_store
+        self._entity_locks: dict[tuple[str, int], asyncio.Lock] = {}
 
     async def process(self, task_id: int) -> bool:
         """Atomically claim and process one task; return whether this worker claimed it."""
@@ -36,12 +37,17 @@ class IndexTaskService:
         task = await IndexTask.get(id=task_id)
 
         try:
-            if task.entity_type == "goods" and task.action == "upsert":
-                goods = await Goods.get_or_none(id=task.entity_id).prefetch_related("category")
-                if goods is not None:
-                    await asyncio.to_thread(self.vector_store.sync_goods, goods)
-            elif task.entity_type == "goods" and task.action == "delete":
-                await asyncio.to_thread(self.vector_store.remove_goods, task.entity_id)
+            lock = self._entity_locks.setdefault((task.entity_type, task.entity_id), asyncio.Lock())
+            async with lock:
+                superseded = await IndexTask.filter(
+                    entity_type=task.entity_type, entity_id=task.entity_id, id__gt=task.id,
+                ).exists()
+                if not superseded and task.entity_type == "goods" and task.action == "upsert":
+                    goods = await Goods.get_or_none(id=task.entity_id).prefetch_related("category")
+                    if goods is not None:
+                        await asyncio.to_thread(self.vector_store.sync_goods, goods)
+                elif not superseded and task.entity_type == "goods" and task.action == "delete":
+                    await asyncio.to_thread(self.vector_store.remove_goods, task.entity_id)
 
             await IndexTask.filter(
                 id=task.id, status="processing", claim_token=claim_token,
@@ -84,7 +90,7 @@ class IndexTaskService:
             processing_started_at=None,
             last_error="任务租约超时，已重新排队",
         )
-        tasks = await IndexTask.filter(status__in=["pending", "failed"]).order_by("id").limit(limit)
+        tasks = await IndexTask.filter(status__in=["pending", "failed"], attempts__lt=INDEX_TASK_MAX_ATTEMPTS).order_by("id").limit(limit)
         succeeded = 0
         failed = 0
         claimed = 0

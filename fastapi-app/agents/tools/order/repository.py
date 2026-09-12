@@ -5,6 +5,7 @@ from tortoise.transactions import in_transaction
 from domain.notifications import notify_order_event
 from models import Goods, Orders
 from domain.order_status import CANCELLABLE_STATUSES, ORDER_CANCELLED, ORDER_PENDING
+from domain.purchase import shipping
 from common.time import format_store_time
 
 
@@ -27,9 +28,10 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
             f"订单号：{order.order_no or 'N/A'}\n"
             f"- 商品：{order.goods.name if order.goods else '未知'}\n"
             f"- 数量：{order.num}\n"
+            f"- 规格：{order.spec or '默认'}\n"
             f"- 单价：¥{order.goods.price if order.goods else '未知'}\n"
             f"- 总价：¥{_order_total(order)}\n"
-            f"- 收货地址：{order.address.address if order.address else '未知'}\n"
+            f"- 收货地址：{shipping(order).get('address') or '未知'}\n"
             f"- 下单时间：{format_store_time(order.time)}\n"
             f"- 状态：{order.status or '待发货'}"
         )
@@ -49,30 +51,16 @@ async def get_order_status(user_id: int, order_id: int = None, order_no: str = N
 async def cancel_order(user_id: int, order_id: int = None, order_no: str = None) -> str:
     if not (order_id or order_no):
         return "请提供订单ID或订单号。"
-    async with in_transaction():
-        filters = {"id": order_id} if order_id else {"order_no": order_no}
-        order = await Orders.filter(user_id=user_id, **filters).select_for_update().first()
-        if not order:
-            return "未找到该订单，无法取消。请确认订单号是否正确。"
-
-        if order.status == ORDER_CANCELLED:
-            return f"订单 {order.order_no or order.id} 已经取消，无需重复操作。"
-        if order.status not in CANCELLABLE_STATUSES:
-            return f"订单 {order.order_no or order.id} 当前状态为“{order.status}”，不能取消。"
-
-        if not order.goods_id:
-            return "订单缺少商品信息，为避免库存不一致，暂时无法取消，请联系人工客服。"
-        goods = await Goods.filter(id=order.goods_id).select_for_update().first()
-        if not goods:
-            return "订单对应商品不存在，为避免库存不一致，暂时无法取消，请联系人工客服。"
-        goods.num += order.num
-        await goods.save(update_fields=["num"])
-        order_label = order.order_no or order.id
-        order.status = ORDER_CANCELLED
-        await order.save(update_fields=["status"])
-        # 与状态变更同事务写站内通知：Agent 取消与 API 取消对买家可感知性一致
-        await notify_order_event(order, goods.name)
-    return f"订单 {order_label} 已成功取消，{goods.name}的库存已恢复。"
+    from domain.order_cancellation import cancel_purchase
+    from common.exception_handler import CustomException
+    try:
+        order, changed, refunded = await cancel_purchase({"role":"用户", "user_id":user_id},
+            order_id=order_id, order_no=order_no)
+    except CustomException as exc:
+        return exc.message
+    if not changed:
+        return f"订单 {order.order_no} 已经取消。" + ("余额已补退。" if refunded else "无需重复操作。")
+    return f"订单 {order.order_no} 已成功取消，库存已恢复。" + ("款项已退回余额。" if refunded else "")
 
 
 __all__ = ["cancel_order", "get_order_status"]

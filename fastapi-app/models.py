@@ -129,6 +129,8 @@ class Orders(Model):
     # 成交价快照：下单时锁定商品单价 × 数量。管理员事后改价时，
     # 历史订单金额与报表不随之漂移（审计要求）
     total_price = fields.DecimalField(max_digits=10, decimal_places=2, null=True)
+    shipping_snapshot = fields.JSONField(null=True)
+    spec = fields.CharField(max_length=255, default='')
 
     class Meta:
         table = 'orders'
@@ -275,8 +277,8 @@ class OpsReport(Model):
 class AuditLog(Model):
     """敏感操作审计：密码重置、账号增删、订单状态强制变更、知识库删除。
 
-    best-effort 写入（业务成功后落记录，失败仅记日志），因此不设外键——
-    审计行允许引用已被删除的目标；operator_name 冗余存储防账号删除后不可读。"""
+    资金和权限变更在业务事务内写入；其他操作可按重要性 best-effort 写入。
+    不设外键，使审计行可引用已删除目标；operator_name 冗余存储防账号删除后不可读。"""
     id = fields.IntField(pk=True, null=False)
     operator_role = fields.CharField(max_length=16)  # 用户 / 管理员 / 系统
     operator_id = fields.IntField()
@@ -319,12 +321,25 @@ class Cart(Model):
     user = fields.ForeignKeyField('models.User', on_delete=fields.CASCADE)
     goods = fields.ForeignKeyField('models.Goods', on_delete=fields.CASCADE)
     num = fields.IntField(default=1)
+    spec = fields.CharField(max_length=255, default='')
     selected = fields.BooleanField(default=True)
     created_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:
         table = 'cart'
-        unique_together = ('user', 'goods')
+        unique_together = ('user', 'goods', 'spec')
 
 
 
+
+class PurchaseRequest(Model):
+    id = fields.IntField(primary_key=True)
+    user = fields.ForeignKeyField('models.User', on_delete=fields.RESTRICT)
+    request_id = fields.CharField(max_length=64)
+    fingerprint = fields.CharField(max_length=64)
+    response = fields.JSONField()
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = 'purchase_request'
+        unique_together = ('user', 'request_id')

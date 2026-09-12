@@ -85,7 +85,7 @@ async def get_sales_analysis(goods_id: int | None = None, days: int = 30):
 
 @router.get("/analysis/inventory")
 async def get_inventory_analysis(days: int = 30):
-    """库存分析：水位分布、资金占用、预警清单。"""
+    """库存分析：水位分布、按当前零售价估算的库存货值、预警清单。"""
     return Result.success(await inventory_analysis(_clamp_days(days)))
 
 

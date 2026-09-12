@@ -86,7 +86,7 @@
         <div class="card-body">
           <div class="metric"><span class="metric-label">预警商品</span>
             <span class="metric-value warning">{{ inventory.warning_count }} 个</span></div>
-          <div class="metric"><span class="metric-label">资金占用</span>
+          <div class="metric"><span class="metric-label" title="库存数量 × 当前零售价；不代表采购成本或实际占款">零售价库存货值</span>
             <span class="metric-value">¥{{ inventory.total_inventory_value }}</span></div>
           <div class="metric"><span class="metric-label">水位分布</span>
             <span class="metric-label">健康 {{ inventory.levels['健康'] }} · 偏低 {{ inventory.levels['偏低'] }} · 紧张 {{ inventory.levels['紧张'] }} · 售罄 {{ inventory.levels['售罄'] }}</span></div>
@@ -216,6 +216,8 @@ const aiAnswer = ref('')
 const degraded = ref(false)
 const reportId = ref(null)
 const error = ref('')
+let factsRequest = 0
+let aiRequest = 0
 
 const dimNames = { sales: '销量', review: '评价', inventory: '库存' }
 const gradeClass = computed(() => ({
@@ -261,15 +263,20 @@ const fetchProducts = async () => {
 }
 
 const loadFacts = async () => {
+  const requestVersion = ++factsRequest
+  aiRequest++
   error.value = ''
+  aiAnswer.value = ''
+  reportId.value = null
+  degraded.value = false
   perf.value = reviews.value = sales.value = null
   // 全店视角：排行 + 库存不依赖选中商品
   const window = { days: days.value }
   request.get('/ops/analysis/sales', { params: window }).then(res => {
-    if (res.code === '200') ranking.value = res.data
+    if (requestVersion === factsRequest && res.code === '200') ranking.value = res.data
   })
   request.get('/ops/analysis/inventory', { params: window }).then(res => {
-    if (res.code === '200') inventory.value = res.data
+    if (requestVersion === factsRequest && res.code === '200') inventory.value = res.data
   })
   if (!selectedId.value) return
   const params = { goods_id: selectedId.value, days: days.value }
@@ -279,6 +286,7 @@ const loadFacts = async () => {
       request.get('/ops/analysis/sales', { params }),
       request.get('/ops/analysis/performance', { params }),
     ])
+    if (requestVersion !== factsRequest) return
     if (revRes.code === '200') reviews.value = revRes.data
     if (salesRes.code === '200') sales.value = salesRes.data
     if (perfRes.code === '200') perf.value = perfRes.data
@@ -291,11 +299,15 @@ const loadFacts = async () => {
 }
 
 const runAiAnalysis = async () => {
+  const requestVersion = ++aiRequest
+  const requestedGoods = selectedId.value
+  const requestedDays = days.value
   aiLoading.value = true
   aiAnswer.value = ''
   degraded.value = false
   try {
-    const res = await request.post('/ops/analysis/ai', { goods_id: selectedId.value, days: days.value })
+    const res = await request.post('/ops/analysis/ai', { goods_id: requestedGoods, days: requestedDays })
+    if (requestVersion !== aiRequest || selectedId.value !== requestedGoods || days.value !== requestedDays) return
     if (res.code === '200') {
       aiAnswer.value = res.data.answer || ''
       degraded.value = res.data.degraded
@@ -311,7 +323,7 @@ const runAiAnalysis = async () => {
     }
   } catch (e) {
     ElMessage.error('AI 分析请求失败，请稍后重试')
-  } finally { aiLoading.value = false }
+  } finally { if (requestVersion === aiRequest) aiLoading.value = false }
 }
 
 const downloadReport = async () => {

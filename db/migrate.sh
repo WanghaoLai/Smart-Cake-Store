@@ -8,8 +8,7 @@
 #   2. 目标库不存在时自动创建（utf8mb4）
 #   3. 创建 _schema_migrations 跟踪表
 #   4. 若 orders 表不存在 → 导入 cake_store.sql（基础 schema，
-#      已预标记 001–011 为已应用）→ 导入 seed_base.sql（演示账号/
-#      区划/分类/公告，INSERT IGNORE 幂等）
+#      已预标记 001–011 为已应用）→ 导入 seed_base.sql（区划/分类/公告，INSERT IGNORE 幂等）
 #   5. 按文件名升序执行 migrations/*.sql，已应用的自动跳过
 #   6. 全程强制 --default-character-set=utf8mb4
 #
@@ -30,7 +29,7 @@ SEED_SQL="${SCRIPT_DIR}/seed_base.sql"
 MIGRATIONS_DIR="${SCRIPT_DIR}/migrations"
 
 # ---- 记录调用方显式传入的环境变量（source .env 后恢复，保证覆盖生效）----
-_OVERRIDE_KEYS=(DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD MYSQL_BIN)
+_OVERRIDE_KEYS=(DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD MYSQL_BIN APP_ENV SEED_DEMO_ACCOUNTS)
 _OVERRIDE_VALUES=()
 for _key in "${_OVERRIDE_KEYS[@]}"; do
   _OVERRIDE_VALUES+=("${!_key:-}")
@@ -53,6 +52,13 @@ for _key in "${_OVERRIDE_KEYS[@]}"; do
   fi
   _index=$((_index + 1))
 done
+
+APP_ENV="${APP_ENV:-production}"
+SEED_DEMO_ACCOUNTS="${SEED_DEMO_ACCOUNTS:-0}"
+if [[ "$SEED_DEMO_ACCOUNTS" == "1" && "$APP_ENV" != "development" ]]; then
+  echo "❌ 演示账号仅允许在显式 development 环境导入" >&2
+  exit 1
+fi
 
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-3306}"
@@ -130,6 +136,12 @@ ORDERS_EXISTS=$(run_mysql -N -B -e \
   "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='orders';")
 
 if [[ "$ORDERS_EXISTS" -eq 0 ]]; then
+  EXISTING_TABLES=$(run_mysql -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name <> '_schema_migrations';")
+  EXISTING_MIGRATIONS=$(run_mysql -N -B -e "SELECT COUNT(*) FROM _schema_migrations;")
+  if [[ "$EXISTING_TABLES" -ne 0 || "$EXISTING_MIGRATIONS" -ne 0 ]]; then
+    echo "❌ 目标库非空但缺少 orders，拒绝导入含 DROP TABLE 的基础 schema。请先检查备份与迁移状态。" >&2
+    exit 1
+  fi
   if [[ ! -f "$BASE_SQL" ]]; then
     echo "❌ orders 表不存在，且找不到基础 schema $BASE_SQL" >&2
     exit 1
@@ -139,15 +151,20 @@ if [[ "$ORDERS_EXISTS" -eq 0 ]]; then
   # 把基础 schema 标记为已应用（防止下次重复执行；cake_store.sql 含 DROP TABLE，重跑会清空数据）
   run_mysql -e \
     "INSERT IGNORE INTO _schema_migrations (filename) VALUES ('__cake_store.sql');"
-  # 基础种子：演示账号/区划/分类/公告。INSERT IGNORE 幂等，失败即中止（缺失会导致无法登录）
+  # 基础种子仅公共参考数据；管理员通过 bootstrap_admin.py 显式初始化。
   if [[ -f "$SEED_SQL" ]]; then
     echo "▶ 导入基础种子: $SEED_SQL"
     run_mysql < "$SEED_SQL"
   else
-    echo "⚠️  未找到 $SEED_SQL，跳过基础种子（新库将没有演示账号与区划数据）" >&2
+    echo "⚠️  未找到 $SEED_SQL，跳过基础种子（新库将没有区划数据）" >&2
   fi
 else
   echo "✓ orders 表已存在，跳过基础 schema"
+fi
+
+# Demo credentials never enter a production database via the normal migration path.
+if [[ "$SEED_DEMO_ACCOUNTS" == "1" ]]; then
+  run_mysql < "${SCRIPT_DIR}/seed_demo_accounts.sql"
 fi
 
 # ---- 3. 顺序执行未应用的迁移 ----

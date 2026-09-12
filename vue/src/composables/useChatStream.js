@@ -1,5 +1,5 @@
 /** Parse the chat SSE protocol independently from view state and rendering. */
-export async function streamChat({ conversationId, message, onStatus, onContent }) {
+export async function streamChat({ conversationId, message, onStatus, onContent, signal }) {
   const response = await fetch(`${import.meta.env.VITE_BASE_URL}/chat/send`, {
     method: 'POST',
     headers: {
@@ -7,7 +7,15 @@ export async function streamChat({ conversationId, message, onStatus, onContent 
       'Authorization': `Bearer ${localStorage.getItem('token')}`,
     },
     body: JSON.stringify({ conversation_id: conversationId, message }),
+    signal,
   })
+
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    localStorage.removeItem('system-user')
+    window.dispatchEvent(new Event('session-cleared'))
+    throw new Error('登录已过期，请重新登录')
+  }
 
   const contentType = response.headers.get('content-type') || ''
   if (contentType.includes('application/json')) {
@@ -22,6 +30,7 @@ export async function streamChat({ conversationId, message, onStatus, onContent 
   let buffer = ''
   let fullContent = ''
   let agentFailed = false
+  let completed = false
 
   const handleEvent = (eventText) => {
     const payload = eventText
@@ -37,6 +46,7 @@ export async function streamChat({ conversationId, message, onStatus, onContent 
       onContent?.(fullContent)
     }
     if (event.type === 'error' || (event.done && event.ok === false)) agentFailed = true
+    if (event.type === 'done' && event.done === true) completed = true
   }
 
   while (true) {
@@ -51,5 +61,6 @@ export async function streamChat({ conversationId, message, onStatus, onContent 
     if (done) break
   }
   if (buffer.trim()) handleEvent(buffer)
+  if (!completed) throw new Error('回答流提前中断，请重试')
   return { content: fullContent, agentFailed }
 }
