@@ -13,10 +13,10 @@
 
       <el-form ref="formRef" :rules="data.rules" :model="data.form" label-position="top" class="password-form">
         <el-form-item label="原密码" prop="password">
-          <el-input v-model="data.form.password" show-password placeholder="请输入当前密码" prefix-icon="Key" />
+          <el-input v-model="data.form.password" show-password placeholder="请输入当前密码" :prefix-icon="Key" />
         </el-form-item>
         <el-form-item label="新密码" prop="newPassword">
-          <el-input v-model="data.form.newPassword" show-password placeholder="请输入新密码" prefix-icon="Lock" />
+          <el-input v-model="data.form.newPassword" show-password placeholder="请输入新密码" :prefix-icon="Lock" />
           <div class="password-strength" v-if="data.form.newPassword">
             <div class="strength-bars">
               <span v-for="i in 4" :key="i" :class="['bar', { active: passwordStrength.score >= i, weak: passwordStrength.level === 'weak', mid: passwordStrength.level === 'mid', strong: passwordStrength.level === 'strong' }]"></span>
@@ -25,7 +25,7 @@
           </div>
         </el-form-item>
         <el-form-item label="确认新密码" prop="confirmPasword">
-          <el-input v-model="data.form.confirmPasword" show-password placeholder="请再次输入新密码" prefix-icon="CircleCheck" />
+          <el-input v-model="data.form.confirmPasword" show-password placeholder="请再次输入新密码" :prefix-icon="CircleCheck" />
         </el-form-item>
 
         <div class="tips-card">
@@ -109,6 +109,7 @@ const save = () => {
         ElMessage.success('修改密码成功，请重新登录')
         localStorage.removeItem('token')
         localStorage.removeItem('system-user')
+        window.dispatchEvent(new Event('session-cleared'))
         router.replace('/login')
       } else { ElMessage.error(res.msg) }
     })

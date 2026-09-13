@@ -16,6 +16,7 @@
 注意：脚本追加写入，重复执行会叠加数据（换 --seed 可得不同分布）。"""
 import argparse
 import asyncio
+import os
 import random
 import sys
 from datetime import datetime, timedelta
@@ -32,7 +33,7 @@ load_dotenv(APP_DIR / ".env")
 
 from tortoise import Tortoise
 
-from settings import TORTOISE_ORM
+from settings import APP_ENV, TORTOISE_ORM
 
 # ---------------- 评价文案池（关键词刻意与分析词典对齐） ----------------
 POS_RICH = [
@@ -83,18 +84,22 @@ def roll_rating(profile: dict) -> int:
 
 
 async def main(days: int, seed: int) -> None:
+    if APP_ENV != "development" or os.getenv("ALLOW_DEMO_SEED") != "1":
+        raise SystemExit("分析演示数据只允许 APP_ENV=development 且 ALLOW_DEMO_SEED=1 时写入")
     random.seed(seed)
     await Tortoise.init(config=TORTOISE_ORM)
     from models import Address, Goods, Orders, Review, User
 
     users = await User.filter(role="用户").values("id")
-    user_ids = [u["id"] for u in users] or [1]
-    user_weight = [5 if uid == user_ids[0] else 1 for uid in user_ids]  # 首用户为主力买家
+    user_ids = [u["id"] for u in users]
     addr_by_user = {}
     for uid in user_ids:
         a = await Address.filter(user_id=uid).first()
         addr_by_user[uid] = a.id if a else None
-    any_addr = next((v for v in addr_by_user.values() if v), None)
+    user_ids = [uid for uid in user_ids if addr_by_user.get(uid)]
+    if not user_ids:
+        raise SystemExit("没有同时拥有本人地址的演示用户，拒绝跨用户借用地址")
+    user_weight = [5 if uid == user_ids[0] else 1 for uid in user_ids]
 
     all_goods = [g for g in await Goods.all() if g.price]
     if len(all_goods) < 25:
@@ -158,7 +163,7 @@ async def main(days: int, seed: int) -> None:
                     status = "已评价" if roll < 0.3 else "待评价" if roll < 0.7 else "已发货" if roll < 0.95 else "已取消"
                 else:
                     status = "已评价" if roll < 0.85 else "待评价" if roll < 0.95 else "已取消"
-                orders_plan.append((g, uid, addr_by_user.get(uid) or any_addr, num, status, price, dt, p))
+                orders_plan.append((g, uid, addr_by_user[uid], num, status, price, dt, p))
     random.shuffle(orders_plan)
 
     order_rows = []

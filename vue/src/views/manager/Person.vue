@@ -23,8 +23,8 @@
         <div class="section-head"><div><h2>个人资料</h2><p>更新你的个人信息，所有修改将实时保存</p></div></div>
         <el-form ref="formRef" :model="data.user" :rules="data.rules" label-position="top" class="profile-form">
           <el-row :gutter="20">
-            <el-col :xs="24" :sm="12"><el-form-item label="账号" prop="username"><el-input disabled v-model="data.user.username" prefix-icon="User" /></el-form-item></el-col>
-            <el-col :xs="24" :sm="12"><el-form-item label="姓名" prop="name"><el-input v-model="data.user.name" placeholder="请输入姓名" prefix-icon="EditPen" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="账号" prop="username"><el-input disabled v-model="data.user.username" :prefix-icon="User" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="姓名" prop="name"><el-input v-model="data.user.name" placeholder="请输入姓名" :prefix-icon="EditPen" /></el-form-item></el-col>
           </el-row>
           <el-form-item><el-button type="primary" round @click="save" size="large"><el-icon><Check /></el-icon>保存修改</el-button></el-form-item>
         </el-form>
@@ -84,11 +84,11 @@
 import { reactive, ref, onMounted } from 'vue'
 import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
-import { Plus, Camera, Check, InfoFilled, Wallet, Lock, Refresh, Tickets } from '@element-plus/icons-vue'
+import { Plus, Camera, Check, InfoFilled, Wallet, Lock, Refresh, Tickets, User, EditPen } from '@element-plus/icons-vue'
 
 const formRef = ref()
 const rechargeFormRef = ref()
-const uploadUrl = import.meta.env.VITE_BASE_URL + '/files/upload?category=avatar'
+const uploadUrl = import.meta.env.VITE_BASE_URL + '/files/upload_avatar'
 const uploadHeaders = { Authorization: `Bearer ${localStorage.getItem('token')}` }
 const data = reactive({
   user: JSON.parse(localStorage.getItem('system-user') || '{}'),
@@ -99,7 +99,10 @@ const data = reactive({
 })
 const rechargeRules = { amount: [{ required: true, message: '请输入充值金额', trigger: 'change' }], payment_method: [{ required: true, message: '请选择支付方式', trigger: 'change' }] }
 const money = value => Number(value || 0).toFixed(2)
-const handleFileUpload = file => { data.user.avatar = file.data }
+const handleFileUpload = file => {
+  if (file.code === "200") data.user.avatar = file.data
+  else ElMessage.error(file.msg || "头像上传失败")
+}
 const emit = defineEmits(['updateUser'])
 
 const save = () => formRef.value.validate(valid => {
@@ -117,12 +120,12 @@ const loadTransactions = () => {
     .finally(() => { data.loading = false })
 }
 const filterTransactions = () => { data.pageNum = 1; loadTransactions() }
-const openRecharge = () => { data.recharge = { amount: 100, payment_method: data.wallet.payment_methods?.[0]?.value || 'alipay' }; data.rechargeVisible = true }
 const requestId = () => (globalThis.crypto?.randomUUID?.().replaceAll('-', '') || `${Date.now()}${Math.random().toString(36).slice(2)}wallet`)
+const openRecharge = () => { data.recharge = { amount: 100, payment_method: data.wallet.payment_methods?.[0]?.value || 'alipay', request_id: requestId() }; data.rechargeVisible = true }
 const submitRecharge = () => rechargeFormRef.value.validate(valid => {
   if (!valid || data.recharging) return
   data.recharging = true
-  request.post('/wallet/recharge', { ...data.recharge, request_id: requestId() }).then(res => {
+  request.post('/wallet/recharge', data.recharge).then(res => {
     if (res.code === '200') { data.wallet = res.data; data.rechargeVisible = false; ElMessage.success('充值成功，余额已更新'); data.pageNum = 1; loadTransactions() }
     else ElMessage.error(res.msg)
   }).finally(() => { data.recharging = false })

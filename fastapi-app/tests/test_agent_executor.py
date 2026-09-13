@@ -163,7 +163,7 @@ class CustomerServiceAgentTests(unittest.IsolatedAsyncioTestCase):
             "agents.agent.executor.rebuild_product_answer",
             new=AsyncMock(return_value="已根据库存回答"),
         ):
-            await executor.process_message("草莓蛋糕还有货吗", [], user_id=7)
+            await executor.process_message("草莓蛋糕还有货吗", [], user_id=7, owner_role="用户")
 
         messages = runtime.calls[0]["input"]["messages"]
         self.assertEqual(grounding.args, ("草莓蛋糕还有货吗", 7, []))

@@ -74,5 +74,5 @@ async def ask_goods(data: GoodsQuestion, current_user: dict = Depends(get_curren
         logger.warning("goods qa model unavailable goods_id=%s user_id=%s error=%s", data.goods_id, current_user["user_id"], exc)
         answer = None
     if answer:
-        return Result.success({"answer": answer, "source": "ai_grounded"})
+        return Result.success({"answer": answer, "source": "ai_assisted_unverified"})
     return Result.success({"answer": grounded_fallback(facts), "source": "database_fallback"})

@@ -35,6 +35,7 @@
               <div v-else class="cell-img placeholder"><el-icon><Picture /></el-icon></div>
               <div class="goods-info-cell">
                 <div class="goods-name-cell line1">{{ scope.row.goodsName }}</div>
+                <div v-if="scope.row.spec" class="goods-meta-cell">规格：{{ scope.row.spec }}</div>
                 <div class="goods-meta-cell">¥{{ scope.row.goodsPrice }} / {{ scope.row.goodsUnit }} × {{ scope.row.num }}</div>
               </div>
             </div>
@@ -78,12 +79,9 @@
               <el-button v-if="data.user.role === '用户' && scope.row.status === '待评价'" text type="primary" size="small" @click="openReview(scope.row)">
                 <el-icon><StarFilled /></el-icon>去评价
               </el-button>
-              <!-- 通用：待发货/已发货 可取消；角色权限在后端状态机校验 -->
+              <!-- 未发货订单可直接撤销；已发货订单需走独立售后流程 -->
               <el-button v-if="canCancel(scope.row.status)" text type="warning" size="small" @click="handleCancel(scope.row.id)">
                 <el-icon><CloseBold /></el-icon>取消
-              </el-button>
-              <el-button text type="danger" size="small" @click="handleDelete(scope.row.id)">
-                <el-icon><Delete /></el-icon>删除
               </el-button>
             </div>
           </template>
@@ -96,7 +94,7 @@
     </div>
 
     <!-- 评价弹窗：星级 + 文本 + 多图上传 -->
-    <el-dialog v-model="data.reviewVisible" width="560px" :close-on-click-modal="false" destroy-on-close>
+    <el-dialog v-model="data.reviewVisible" width="560px" :close-on-click-modal="false" destroy-on-close @closed="cleanupReviewUploads">
       <template #header>
         <div class="dialog-header-custom">
           <el-icon class="dialog-icon"><StarFilled /></el-icon>
@@ -158,7 +156,7 @@ import { reactive, ref, computed } from "vue";
 import request from "@/utils/request";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
-  Search, Delete, Tickets, Picture, Van, CircleCheck, CloseBold, StarFilled, Plus,
+  Search, Tickets, Picture, Van, CircleCheck, CloseBold, StarFilled, Plus,
 } from "@element-plus/icons-vue";
 
 // 状态筛选选项：覆盖订单完整生命周期（已签收已合并为待评价）
@@ -179,7 +177,7 @@ const STATUS_CLASS = {
   '已取消': 'st-cancelled',
 }
 const statusClass = (s) => STATUS_CLASS[s] || 'st-pending'
-const canCancel = (s) => s === '待发货' || s === '已发货'
+const canCancel = (s) => s === '待发货'
 
 const data = reactive({
   user: JSON.parse(localStorage.getItem('system-user') || '{}'),
@@ -255,14 +253,6 @@ const handleShip = (id) => _callStatus(id, '已发货', '标记为已发货')
 const handleConfirm = (id) => _callStatus(id, '待评价', '确认签收')
 const handleCancel = (id) => _callStatus(id, '已取消', '取消')
 
-const handleDelete = (id) => {
-  ElMessageBox.confirm('删除后数据无法恢复，您确定删除吗?', '删除确认', { type: 'warning' }).then(res => {
-    request.delete('/orders/delete/' + id).then(res => {
-      if (res.code === '200') { load(); ElMessage.success('操作成功') } else { ElMessage.error(res.msg) }
-    })
-  }).catch(() => {})
-}
-
 // ============ 评价 ============
 const openReview = (row) => {
   data.reviewForm = {
@@ -293,6 +283,15 @@ const handleUploadRemove = (file, fileList) => {
   const removed = file.response?.data
   data.reviewForm.images = data.reviewForm.images.filter(u => u !== removed)
   data.reviewForm.fileList = fileList
+  if (removed) request.delete('/files/review-upload', { data: { path: removed } }).catch(() => {})
+}
+
+const cleanupReviewUploads = () => {
+  for (const path of data.reviewForm.images || []) {
+    request.delete('/files/review-upload', { data: { path } }).catch(() => {})
+  }
+  data.reviewForm.images = []
+  data.reviewForm.fileList = []
 }
 
 const submitReview = () => {
@@ -309,6 +308,8 @@ const submitReview = () => {
     }).then(res => {
       if (res.code === '200') {
         ElMessage.success('评价已提交，感谢您的反馈')
+        data.reviewForm.images = []
+        data.reviewForm.fileList = []
         data.reviewVisible = false
         load()
       } else {

@@ -60,8 +60,14 @@ async def select_all(name: str = ""):
 
 
 @router.get("/selectPage", dependencies=[Depends(get_current_user)])
-async def select(name: str = "", page_num: int = 1, page_size: int = 5):
-    page_num, page_size = clamp_page(page_num, page_size)
+async def select(
+    name: str = "", pageNum: int | None = None, pageSize: int | None = None,
+    page_num: int = 1, page_size: int = 5,
+):
+    page_num, page_size = clamp_page(
+        pageNum if pageNum is not None else page_num,
+        pageSize if pageSize is not None else page_size,
+    )
     # 同时获取分页数据和总数
     query = Notice.filter(name__contains=name)
     # 获取分页数据

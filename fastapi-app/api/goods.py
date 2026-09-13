@@ -1,8 +1,10 @@
+import asyncio
 import logging
+import time
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from tortoise.contrib.pydantic import pydantic_model_creator
 from tortoise.transactions import in_transaction
@@ -10,14 +12,19 @@ from tortoise.transactions import in_transaction
 from common.auth import get_current_user, get_current_admin
 from common.exception_handler import CustomException
 from common.pagination import clamp_page
+from common.rate_limit import SlidingWindowRateLimiter
 from common.result import Result, PageInfo
 from models import Favorite, Goods, IndexTask, Orders, Review
 from agents.rag import index_task_service
 from agents.recommendation import search
+from settings import GOODS_SEARCH_MAX_CONCURRENCY, GOODS_SEARCH_RATE_LIMIT, GOODS_SEARCH_RATE_WINDOW_SECONDS
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/goods", dependencies=[Depends(get_current_user)])
+search_rate_limiter = SlidingWindowRateLimiter(GOODS_SEARCH_RATE_LIMIT, GOODS_SEARCH_RATE_WINDOW_SECONDS)
+_search_slots = asyncio.Semaphore(max(1, GOODS_SEARCH_MAX_CONCURRENCY))
+_search_cache: dict[tuple[str, int], tuple[float, dict]] = {}
 
 GoodsPydantic = pydantic_model_creator(Goods)
 
@@ -77,6 +84,13 @@ class GoodsUpdate(_GoodsWriteBase):
         value = value.strip()
         if not value:
             raise ValueError("商品名称不能为空")
+        return value
+
+    @field_validator("name", "price", "num", mode="before")
+    @classmethod
+    def reject_null_core_fields(cls, value):
+        if value is None:
+            raise ValueError("商品名称、价格和库存不能为 null")
         return value
 
     @model_validator(mode="after")
@@ -167,11 +181,31 @@ async def select(name: str = "", categoryId: int = 0, pageNum: int = 1, pageSize
 
 
 @router.get("/search")
-async def semantic_search(q: str = "", top_k: int = 10):
+async def semantic_search(
+    q: str = Query("", max_length=200),
+    top_k: int = 10,
+    current_user: dict = Depends(get_current_user),
+):
     """语义搜索：自然语言描述直达商品（复用客服商品向量索引）。
     三级兜底（向量 → 关键字 → 热销），mode 字段告知前端命中哪一级。"""
     top_k = min(max(top_k, 1), 50)
-    data = await search(q, top_k)
+    normalized = q.strip()
+    limiter_key = f"{current_user['role']}:{current_user['user_id']}"
+    if not search_rate_limiter.allow(limiter_key):
+        raise CustomException("搜索请求过于频繁，请稍后再试", status_code=429)
+    cache_key = (normalized.casefold(), top_k)
+    cached = _search_cache.get(cache_key)
+    now = time.monotonic()
+    if cached and cached[0] > now:
+        data = cached[1]
+    else:
+        async with _search_slots:
+            data = await search(normalized, top_k)
+        _search_cache[cache_key] = (now + 60, data)
+        if len(_search_cache) > 256:
+            for key, value in list(_search_cache.items()):
+                if value[0] <= now:
+                    _search_cache.pop(key, None)
     return Result.success(data)
 
 

@@ -1,16 +1,19 @@
 # 文件上传与下载
 import asyncio
 import os
+import time
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 from starlette.responses import FileResponse
 
-from common.auth import get_current_admin, get_current_customer
+from common.auth import get_current_admin, get_current_customer, get_current_user
 from common.exception_handler import CustomException
 from common.rate_limit import SlidingWindowRateLimiter
 from common.result import Result
+from models import Review
 from settings import (
     REVIEW_UPLOAD_GLOBAL_QUOTA_BYTES,
     REVIEW_UPLOAD_RATE_LIMIT,
@@ -46,6 +49,43 @@ review_upload_limiter = SlidingWindowRateLimiter(
 _upload_quota_lock = asyncio.Lock()
 
 
+class ReviewUploadDelete(BaseModel):
+    path: str = Field(min_length=1, max_length=255)
+
+
+def _review_filename(path: str, owner_id: int) -> str | None:
+    prefix = "files/download/review/"
+    if not path.startswith(prefix):
+        return None
+    filename = path.removeprefix(prefix)
+    if os.path.basename(filename) != filename or not filename.startswith(f"user_{owner_id}_"):
+        return None
+    return filename
+
+
+async def _delete_unreferenced_review(path: str, owner_id: int) -> bool:
+    filename = _review_filename(path, owner_id)
+    if filename is None:
+        raise CustomException("只能删除当前用户上传的评价图片")
+    if await Review.filter(images__contains=path).exists():
+        raise CustomException("图片已被评价引用，不能删除")
+    target = UPLOAD_DIR / CATEGORY_DIRS["review"] / filename
+    await asyncio.to_thread(target.unlink, missing_ok=True)
+    return True
+
+
+async def _prune_stale_review_uploads(owner_id: int) -> None:
+    directory = UPLOAD_DIR / CATEGORY_DIRS["review"]
+    if not directory.exists():
+        return
+    cutoff = time.time() - 24 * 60 * 60
+    for target in directory.glob(f"user_{owner_id}_*"):
+        if target.is_file() and target.stat().st_mtime < cutoff:
+            path = f"files/download/review/{target.name}"
+            if not await Review.filter(images__contains=path).exists():
+                await asyncio.to_thread(target.unlink, missing_ok=True)
+
+
 def _image_kind(header: bytes) -> str | None:
     """仅信任文件签名，不信任客户端 Content-Type/扩展名。"""
     if header.startswith(b"\xff\xd8\xff"):
@@ -74,7 +114,7 @@ def _usage_bytes(directory: Path, prefix: str | None = None) -> int:
     )
 
 
-async def _save(file: UploadFile, category: str, owner_id: int | None = None) -> str:
+async def _save(file: UploadFile, category: str, owner_id: int | None = None, owner_role: str = "用户") -> str:
     """把上传文件按类别分块落盘，返回相对子目录的文件名（UUID，杜绝覆盖与路径穿越）。
 
     分块读写而非 file.read() 一次性读全量：既限制总大小（超限即中止并清理半成品），
@@ -90,15 +130,17 @@ async def _save(file: UploadFile, category: str, owner_id: int | None = None) ->
     if ext not in ALLOWED_EXTENSIONS:
         raise CustomException(f"仅支持图片文件: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
 
-    owner_prefix = f"user_{owner_id}_" if category == "review" and owner_id is not None else ""
+    owned_upload = category in {"review", "avatar"} and owner_id is not None
+    role_prefix = "admin" if owner_role == "管理员" else "user"
+    owner_prefix = f"{role_prefix}_{owner_id}_" if owned_upload else ""
     stored_name = f"{owner_prefix}{uuid.uuid4().hex}{ext}"
     file_path = dir_path / stored_name
     size = 0
     async with _upload_quota_lock:
-        global_usage = await asyncio.to_thread(_usage_bytes, dir_path) if category == "review" else 0
+        global_usage = await asyncio.to_thread(_usage_bytes, dir_path) if owned_upload else 0
         user_usage = (
             await asyncio.to_thread(_usage_bytes, dir_path, owner_prefix)
-            if category == "review" and owner_prefix else 0
+            if owned_upload else 0
         )
         try:
             await asyncio.to_thread(file_path.write_bytes, b"")
@@ -113,11 +155,11 @@ async def _save(file: UploadFile, category: str, owner_id: int | None = None) ->
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     raise CustomException(f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB 大小限制")
-                if category == "review":
+                if owned_upload:
                     if user_usage + size > REVIEW_UPLOAD_USER_QUOTA_BYTES:
-                        raise CustomException("当前用户的评价图片存储配额已用完")
+                        raise CustomException("当前用户的图片存储配额已用完")
                     if global_usage + size > REVIEW_UPLOAD_GLOBAL_QUOTA_BYTES:
-                        raise CustomException("评价图片存储空间不足，请联系管理员")
+                        raise CustomException("图片存储空间不足，请联系管理员")
                 # 本地磁盘写入下沉到线程，避免阻塞 FastAPI 事件循环。
                 await asyncio.to_thread(_append_chunk, file_path, chunk)
         except Exception:
@@ -143,6 +185,15 @@ async def upload_file(
     return Result.success(f"files/download/{rel_path}")
 
 
+@router.post("/upload_avatar")
+async def upload_avatar_file(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    key = f"avatar:{current_user['role']}:{current_user['user_id']}"
+    if not review_upload_limiter.allow(key):
+        raise HTTPException(status_code=429, detail="头像上传过于频繁，请稍后重试")
+    rel_path = await _save(file, "avatar", owner_id=current_user["user_id"], owner_role=current_user["role"])
+    return Result.success(f"files/download/{rel_path}")
+
+
 @router.post("/upload_review")
 async def upload_review_file(
     file: UploadFile = File(...),
@@ -159,8 +210,18 @@ async def upload_review_file(
             f"最多 {REVIEW_UPLOAD_RATE_LIMIT} 个文件"
             ),
         )
+    await _prune_stale_review_uploads(current_user["user_id"])
     rel_path = await _save(file, "review", owner_id=current_user["user_id"])
     return Result.success(f"files/download/{rel_path}")
+
+
+@router.delete("/review-upload")
+async def delete_review_upload(
+    payload: ReviewUploadDelete,
+    current_user: dict = Depends(get_current_customer),
+):
+    await _delete_unreferenced_review(payload.path, current_user["user_id"])
+    return Result.success()
 
 
 @router.get("/download/{category}/{filename}")

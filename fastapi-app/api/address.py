@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -9,7 +10,7 @@ from common.auth import get_current_customer, get_current_user
 from common.exception_handler import CustomException, ForbiddenException, NotFoundException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
-from models import Address, City, Orders, Province, Town
+from models import Address, City, Orders, Province, Town, User
 
 router = APIRouter(prefix="/address", dependencies=[Depends(get_current_user)])
 
@@ -33,10 +34,10 @@ AddressCreatePydantic = create_model(
 )
 
 
-async def _resolve_region_names(payload: dict) -> None:
+async def _resolve_region_names(payload: dict, fallback=None) -> None:
     """根据传入的 ID 反查省/市/区名称并写回 payload；ID 缺失则清空对应名称。
     调用方在 update 时需要把缺失的 ID 显式传 None 才会清空旧值。"""
-    province_id = payload.get("province_id")
+    province_id = payload.get("province_id", getattr(fallback, "province_id", None))
     if province_id:
         province = await Province.get_or_none(id=province_id)
         if province is None:
@@ -45,23 +46,45 @@ async def _resolve_region_names(payload: dict) -> None:
     elif "province_id" in payload:
         payload["province_name"] = None
 
-    city_id = payload.get("city_id")
+    city_id = payload.get("city_id", getattr(fallback, "city_id", None))
     if city_id:
         city = await City.get_or_none(id=city_id)
         if city is None:
             raise CustomException("所选城市不存在")
+        if city.province_id != province_id:
+            raise CustomException("所选城市不属于所选省份")
         payload["city_name"] = city.name
     elif "city_id" in payload:
         payload["city_name"] = None
 
-    town_id = payload.get("town_id")
+    town_id = payload.get("town_id", getattr(fallback, "town_id", None))
     if town_id:
         town = await Town.get_or_none(id=town_id)
         if town is None:
             raise CustomException("所选区县不存在")
+        if town.city_id != city_id:
+            raise CustomException("所选区县不属于所选城市")
         payload["town_name"] = town.name
     elif "town_id" in payload:
         payload["town_name"] = None
+
+
+def _validate_required_address(payload: dict, fallback=None) -> None:
+    def value(name):
+        return payload.get(name, getattr(fallback, name, None))
+
+    for field, label in (("name", "收货人"), ("phone", "联系电话"), ("detail", "详细地址")):
+        current = value(field)
+        if not isinstance(current, str) or not current.strip():
+            raise CustomException(f"{label}不能为空")
+        if len(current.strip()) > 255:
+            raise CustomException(f"{label}过长")
+        payload[field] = current.strip()
+    if not re.fullmatch(r"[0-9+()\- ]{6,32}", value("phone")):
+        raise CustomException("联系电话格式不正确")
+    for field, label in (("province_id", "省份"), ("city_id", "城市"), ("town_id", "区县")):
+        if not value(field):
+            raise CustomException(f"请选择{label}")
 
 
 def _compose_full_address(payload: dict) -> Optional[str]:
@@ -138,20 +161,17 @@ async def _maybe_promote_default(user_id: int) -> None:
 @router.post("/add")
 async def add(address_pydantic: AddressCreatePydantic, current_user: dict = Depends(get_current_customer)):
     create_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
+    _validate_required_address(create_data)
     await _resolve_region_names(create_data)
     create_data = _strip_relation_keys(create_data)
     create_data["address"] = _compose_full_address(create_data)
     create_data['user_id'] = current_user["user_id"]
 
     # 用户首条地址自动设为默认；显式 is_default=True 时清掉其他默认
-    user_address_count = await Address.filter(user_id=current_user["user_id"]).count()
-    is_default_requested = bool(create_data.get("is_default"))
-    if user_address_count == 0 or is_default_requested:
-        create_data["is_default"] = True
-    else:
-        create_data["is_default"] = False
-
     async with in_transaction():
+        await User.filter(id=current_user["user_id"]).select_for_update().first()
+        user_address_count = await Address.filter(user_id=current_user["user_id"]).count()
+        create_data["is_default"] = user_address_count == 0 or bool(create_data.get("is_default"))
         if create_data["is_default"]:
             await _enforce_default_uniqueness(current_user["user_id"])
         await Address.create(**create_data)
@@ -168,7 +188,8 @@ async def update(address_pydantic: AddressCreatePydantic, current_user: dict = D
     if target.user_id != current_user["user_id"]:
         raise ForbiddenException("无权操作该地址")
     update_data = address_pydantic.model_dump(exclude_unset=True, exclude={'id', 'user_id'})
-    await _resolve_region_names(update_data)
+    _validate_required_address(update_data, target)
+    await _resolve_region_names(update_data, target)
     update_data = _strip_relation_keys(update_data)
     # 用户改了任何结构化字段就重新拼接 address；否则保留旧值
     region_keys = {"province_id", "province_name", "city_id", "city_name",
@@ -184,13 +205,12 @@ async def update(address_pydantic: AddressCreatePydantic, current_user: dict = D
             update_data["address"] = None
 
     # 默认地址互斥更新：要把这条设为默认，必须先把同 user 的其他默认清掉
-    if update_data.get("is_default"):
-        async with in_transaction():
+    async with in_transaction():
+        await User.filter(id=target.user_id).select_for_update().first()
+        if update_data.get("is_default"):
             await _enforce_default_uniqueness(
                 target.user_id, exclude_id=target.id
             )
-            await Address.filter(id=address_pydantic.id).update(**update_data)
-    else:
         await Address.filter(id=address_pydantic.id).update(**update_data)
     return Result.success()
 
@@ -204,6 +224,7 @@ async def set_default(address_id: int, current_user: dict = Depends(get_current_
     if target.user_id != current_user["user_id"]:
         raise ForbiddenException("无权操作该地址")
     async with in_transaction():
+        await User.filter(id=target.user_id).select_for_update().first()
         await _enforce_default_uniqueness(target.user_id, exclude_id=address_id)
         await Address.filter(id=address_id).update(is_default=True)
     return Result.success()
@@ -220,10 +241,11 @@ async def delete(address_id: int, current_user: dict = Depends(get_current_custo
     was_default = target.is_default
     if await Orders.filter(address_id=address_id).exists():
         raise CustomException("该地址已被历史订单引用，不能删除，可新增其他地址")
-    await Address.filter(id=address_id).delete()
-    # 删除的是默认地址：自动把同 user 最早的一条提升为默认
-    if was_default:
-        await _maybe_promote_default(user_id)
+    async with in_transaction():
+        await User.filter(id=user_id).select_for_update().first()
+        await Address.filter(id=address_id).delete()
+        if was_default:
+            await _maybe_promote_default(user_id)
     return Result.success()
 
 

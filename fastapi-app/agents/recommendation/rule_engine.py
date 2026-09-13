@@ -4,9 +4,8 @@
 单店用户量与交互密度不足以训练协同过滤/深度模型——规则版已能利用全部现有信号，
 且每条推荐可解释（reason 字段）。冷启动（无收藏无订单）回退销量 Top N。"""
 import logging
-import math
 
-from tortoise.functions import Avg, Count
+from tortoise.functions import Avg
 
 from models import Favorite, Goods, Orders, Review
 from settings import RECOMMEND_WEIGHTS

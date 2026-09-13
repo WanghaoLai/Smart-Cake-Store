@@ -22,6 +22,7 @@ def runtime(
         state={"messages": []},
         context=AgentContext(
             user_id=7,
+            owner_role="用户",
             conversation_id=11,
             user_message=message,
             recent_history=recent_history,
@@ -97,7 +98,7 @@ class LangChainToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_order_accepts_confirmed_follow_up_for_same_order(self):
         cancel_tool = next(item for item in business_tools() if item.name == "cancel_order")
         confirmation_context = runtime(
-            "确认",
+            "确认取消订单号 202608130001",
             (("assistant", "请确认是否要取消订单 202608130001？"),),
         )
         with patch(
@@ -137,6 +138,25 @@ class LangChainToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("尚未明确确认取消", result)
+
+    async def test_cancel_rejects_questions_wrong_targets_and_vague_confirmation(self):
+        tool = next(t for t in business_tools() if t.name == "cancel_order")
+        for message in ["订单123能取消吗？", "确认取消订单号 1234", "如何取消订单123", "确认", "不想取消订单123"]:
+            with self.subTest(message=message), patch("agents.tools.business.cancel_order", AsyncMock()) as mutation:
+                result = await tool.coroutine(order_no="123", runtime=runtime(message))
+                mutation.assert_not_awaited()
+                self.assertIn("尚未明确确认", result)
+
+    async def test_admin_id_collision_cannot_access_customer_orders(self):
+        from dataclasses import replace
+        ctx = runtime("确认取消订单号 123")
+        ctx.context = replace(ctx.context, owner_role="管理员")
+        for name in ["get_order_status", "cancel_order"]:
+            tool = next(t for t in business_tools() if t.name == name)
+            with patch("agents.tools.business." + name, AsyncMock()) as repository:
+                result = await tool.coroutine(order_no="123", runtime=ctx)
+                repository.assert_not_awaited()
+                self.assertIn("身份无效",result)
 
     def test_order_identifiers_are_mutually_exclusive(self):
         cancel_tool = next(item for item in business_tools() if item.name == "cancel_order")

@@ -1,3 +1,4 @@
+import uuid
 """购物车测试（SQLite 内存）。
 
 覆盖核心不变量：
@@ -116,7 +117,7 @@ class CartTests(unittest.IsolatedAsyncioTestCase):
         await self._add(2, 1)   # 128 × 1 = 128 → 合计 324
         ids = [r.id for r in await Cart.filter(user_id=USER["user_id"])]
 
-        result = (await checkout(CartCheckoutPydantic(ids=ids, addressId=1), USER)).data
+        result = (await checkout(CartCheckoutPydantic(request_id=uuid.uuid4().hex, ids=ids, addressId=1), USER)).data
         self.assertEqual(Decimal(str(result["total"])), Decimal("324.00"))
         self.assertEqual(len(result["order_nos"]), 2)
 
@@ -138,7 +139,7 @@ class CartTests(unittest.IsolatedAsyncioTestCase):
         ids = [r.id for r in await Cart.filter(user_id=USER["user_id"])]
 
         with self.assertRaises(ConflictException):
-            await checkout(CartCheckoutPydantic(ids=ids, addressId=1), USER)
+            await checkout(CartCheckoutPydantic(request_id=uuid.uuid4().hex, ids=ids, addressId=1), USER)
         # 整体回滚：无订单、库存未动、购物车未清
         self.assertEqual(await Orders.all().count(), 0)
         self.assertEqual((await Goods.get(id=1)).num, 10)
@@ -149,7 +150,7 @@ class CartTests(unittest.IsolatedAsyncioTestCase):
         await self._add(1, 2)  # 需 196 > 100
         ids = [r.id for r in await Cart.filter(user_id=USER["user_id"])]
         with self.assertRaises(ConflictException):
-            await checkout(CartCheckoutPydantic(ids=ids, addressId=1), USER)
+            await checkout(CartCheckoutPydantic(request_id=uuid.uuid4().hex, ids=ids, addressId=1), USER)
         self.assertEqual(await Orders.all().count(), 0)
         self.assertEqual(await Cart.filter(user_id=USER["user_id"]).count(), 1)
 
@@ -157,10 +158,10 @@ class CartTests(unittest.IsolatedAsyncioTestCase):
         await self._add(1, 1)
         ids = [r.id for r in await Cart.filter(user_id=USER["user_id"])]
         with self.assertRaises(ForbiddenException):
-            await checkout(CartCheckoutPydantic(ids=ids, addressId=999), USER)
+            await checkout(CartCheckoutPydantic(request_id=uuid.uuid4().hex, ids=ids, addressId=999), USER)
         # 混入不存在的条目 id → 整体拒绝
         with self.assertRaises(NotFoundException):
-            await checkout(CartCheckoutPydantic(ids=ids + [99999], addressId=1), USER)
+            await checkout(CartCheckoutPydantic(request_id=uuid.uuid4().hex, ids=ids + [99999], addressId=1), USER)
 
 
 if __name__ == "__main__":

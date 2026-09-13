@@ -1,0 +1,332 @@
+项目逐模块代码审查（2026-09-10）
+
+审查依据：先阅读用户指定的《代码审查员.md》，采用正确性、安全性、可维护性、性能和测试五个维度。该文件用于明确审查方法，其中的角色设定、示例和经验声明不作为项目事实。未参照项目内任何 Markdown 文档；项目判断仅来自 Python、Vue/JavaScript、SQL、JSON、Shell、Docker/YAML 配置和实际测试。审查对象为当前工作区，包含尚未跟踪的 Docker 配置；未修改业务代码。
+
+结论：已有较好的基础措施，包括服务端角色鉴权、密码哈希与令牌版本撤销、交易事务与商品行锁、Decimal 金额、订单成交价快照、评价唯一约束、商品索引 outbox，以及 AI 内容的 DOMPurify 清洗。但跨入口业务规则和前后端契约存在明确缺陷，当前不宜直接作为真实交易系统上线。
+
+证据分级：
+【已复现】在 SQLite 内存数据库、进程内 HTTP 请求或确定性替身中运行当前代码得到结果；不等同于实测 MySQL 并发或真实模型。
+【源码确定】可以从调用链、请求字段或 SQL 约束直接确定行为。
+【并发推导】给出具体交错时序，尚未用独立 MySQL 连接实测。
+【建议】质量改进或需要业务决策的边界，不表述为已发生事故。
+🔴 为资金、安全、数据完整性或关键功能阻塞；🟡 为建议修复；💭 为低优先级改进。
+
+验证：本次重新运行后端测试，134 passed、6 subtests passed，21 个 pk 弃用警告；Vue 生产构建成功，Element Plus 分包约 902 kB（gzip 约 277 kB），存在体积警告。额外复现使用临时脚本，关闭外部模型凭据，仅连接 SQLite 内存数据库，没有执行真实数据库迁移或外部模型调用；未做浏览器端到端验证。测试通过不能证明以下缺陷不存在。
+
+1. 应用入口、公共认证、错误处理与限流
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/main.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/settings.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/common/。
+已有措施：路由显式注册；CORS 白名单；JWT 密钥在启动时检查；每次请求核对账号存在性和 token_version；强制改密限制由服务端执行。异常响应不直接输出内部堆栈。
+
+🔴 R01【已复现】参数校验日志记录明文密码。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/common/exception_handler.py:64。
+logger.warning 直接输出 exc.errors()，其中包含 input。实际请求 /user/reset-password/1 只传测试密码时，由于缺少 username，日志将整个请求对象连同密码一起打印。登录、注册等入口遇到同类字段校验错误也可能出现。
+影响：密码进入日志系统，扩大可读取凭据的范围。
+建议：记录字段位置、错误类型和不含 input 的摘要；对 password、newPassword、Authorization 等统一脱敏，不依赖调用方自行注意。
+
+🟡【源码确定】bcrypt 的 checkpw/hashpw 同步运行在 async 登录、注册、改密函数中，期间会阻塞事件循环。建议下沉线程池并保留并发限额。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/common/auth.py:44、58；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/auth.py:59。
+
+🟡【源码确定】所谓账号限流键同时包含 IP，同一账号换 IP 会获得独立窗口；限流字典也不会主动淘汰长期不用的键。建议账号和 IP 分别计数，并回收过期主体。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/auth.py:47；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/common/rate_limit.py:22。
+
+2. 登录注册、账号资料与后台账号管理
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/auth.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/auth_schemas.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/account.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/user.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/admin.py；对应 Login/Register/Person/Password/User/Admin 页面。
+已有措施：注册角色由服务端固定；用户列表不输出密码；个人资料接口只开放姓名和头像；修改密码会撤销旧 token。
+
+🔴 R02【已复现】后台“重置用户密码”必然触发 422。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/User.vue:184；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/user.py:34、101。
+前端只发送 password；后端复用 UserCreate，要求 username。实际 HTTP 请求返回 username - Field required。前端 resetting 只在成功响应 then 内恢复，422 时按钮还会持续处于加载状态。
+建议：为重置密码定义专用输入模型，仅要求新密码；在 finally 中恢复按钮，并增加页面实际请求形态的回归用例。
+
+🟡【并发推导】改密、重置密码以“读旧版本再写旧版本+1”更新 token_version，没有行锁或数据库原子自增。重叠的改密请求可能丢失一次版本推进，导致第二次改密没有撤销两次操作之间签发的 token。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/auth.py:124；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/user.py:108；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/admin.py:130。
+建议：事务内串行验证与修改密码，并原子推进版本。账号更新还应拒绝 null 密码、空用户名等无意义输入，并转换唯一键冲突。
+
+3. 商品与分类管理
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/goods.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/category.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Goods.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Category.vue。
+已有措施：商品写入字段白名单、金额和库存非负校验；商品变更与索引任务同事务提交；有交易记录的商品禁止硬删除。
+
+🔴 R03【已复现】商品编辑提交展示字段，被后端拒绝。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Goods.vue:235、257；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/goods.py:28、157。
+列表包含 categoryName；handleEdit 复制整行，update 原样提交；后端 extra="forbid" 拒绝该字段。实际拿列表返回行提交 /goods/update，得到 HTTP 422 categoryName - Extra inputs are not permitted。
+建议：前端显式构造可写字段 payload，继续保留后端白名单；统一 shelf_life/shelfLife 的写入名称，避免别名重复提交。
+
+🔴 R04【源码确定】允许零价商品，但 MySQL 钱包流水禁止零金额。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/goods.py:54；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/orders.py:134；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/cart.py:217；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/migrations/014_wallet.sql:24。
+price=0 能通过商品校验，结算却必然创建 amount=0 的 payment，违反 CHECK(amount <> 0)。零价订单会失败，购物车中包含零价商品也会使整单回滚。SQLite generate_schemas 不包含这条 SQL CHECK，因此现有测试不能发现。
+建议：明确是否支持赠品。支持时允许零价订单但不创建零金额资金流水；不支持时将价格约束改为严格正数。测试必须覆盖实际迁移后的 MySQL schema。
+
+🟡【源码确定】GoodsUpdate 接受 name/price/num 显式 null，但数据库不允许这些字段为空。应区分“未提交”与“提交 null”，在请求层返回 422，而非数据库错误。
+
+4. 订单创建、生命周期与历史数据
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/orders.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/domain/order_status.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Orders.vue；Cake/CakeDetail/Favorite 的下单入口。
+已有措施：地址归属检查；商品和钱包行锁；扣款、库存、订单、流水同事务；总价由服务器计算并留快照；取消保留订单历史。
+
+🔴 R05【源码确定】单商品下单没有业务幂等键，连点或超时重试会再次扣款。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/orders.py:78、120；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/CakeDetail.vue:302、192；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Cake.vue:302；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Favorite.vue:157。
+每个请求生成新的 order_no；payment 的唯一 request_id 又基于新 order.id，不能去重同一次购买。页面也未设置提交中的互斥状态。
+建议：一次购买在客户端生成并保留 request_id；服务器建立用户+业务请求唯一约束，并返回已创建的订单。按钮互斥作为体验保护，不替代服务端幂等。
+
+🔴 R06【已复现】修改地址簿会改写历史订单展示的收货信息。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/orders.py:277；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/address.py:169；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/models.py:119。
+订单只保留 address_id，列表每次读取 Address 当前值。已复现：订单原地址为“原地址”，修改地址后旧订单返回“新地址”。删除地址被禁止，但编辑仍可改变所有关联订单。
+建议：下单时保存收货人、电话、完整地址快照，订单和履约读取快照；若允许改配送地址，建立独立的受状态约束的订单修改操作。
+
+💭【业务边界】当前用户可直接取消已发货订单，立即回补库存并退款；这是状态机明确写出的规则，不能仅凭审查者偏好断言为 bug。若用于真实配送，需要决定已发货退款是否应经过退货/拦截确认。
+
+5. 购物车
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/cart.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/stores/cart.js；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Cart.vue。
+已有措施：按用户过滤条目；购物车批量结算整体事务；商品锁按 ID 排序；唯一约束防止同商品重复行。
+
+🔴 R07【并发推导】同一批购物车并发结算可能生成两批订单并重复扣款。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/cart.py:174、181、230。
+具体交错：A/B 同时普通读取相同 cart_rows；A 获得商品锁，B 等待；A 创建订单并删除购物车后提交；B 随后获得商品锁，继续使用先前读到的条目，若余额和库存足够仍会再次创建订单。第二次删除影响零行，代码没有检查。锁住商品只能防止库存超卖，不能证明条目尚未结算。
+建议：使用可验证的结算请求幂等键；在统一锁顺序下锁定并重新读取购物车条目，确保一次消费；增加两个独立 MySQL 连接的并发回归用例。
+
+🟡【并发推导】加购的读取-累加-保存存在丢失更新；首次插入冲突后的补偿路径再次累加时没有复查库存。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/cart.py:66、85。
+建议：事务内锁条目并复查商品库存，或使用带约束条件的原子更新；检查 affected rows 并正确处理唯一键竞争。
+
+🟡【源码确定】数量修改被后端 409 拒绝后，Axios reject 导致 onNumChange 中用于恢复列表的 res.code 分支不执行，本地数量继续显示失败的值。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Cart.vue:145。
+建议：catch 中恢复旧数量或重新加载，并防止较早响应覆盖较新输入。
+
+6. 钱包与充值
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/wallet.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/models.py 的 WalletTransaction；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Person.vue。
+已有措施：Decimal、余额行锁、唯一 request_id；充值失败事务回滚；生产配置默认禁用模拟充值，前端明确展示演示支付，不将其误判为已接入真实支付。
+
+🟡【源码确定】前端每次重新点击充值都生成新的 request_id，超时后人工重试无法复用后端已有的幂等保护。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Person.vue:121、125；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/wallet.py:94。
+建议：打开一次充值确认流程时创建请求号，直到确认结果或明确创建新交易才更换。后端重复请求还应核对金额和支付方式是否与原请求一致。
+
+资金路径最严重的问题是第 11 模块的 AI 取消不退款；不是 wallet.recharge 事务本身没有回滚。
+
+7. 地址与行政区划
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/address.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/region.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Address.vue。
+已有措施：个人写接口限制普通用户；写入归属来自 token；列表强制本人范围；MySQL 生成列唯一索引限制一人一个默认地址。
+
+🟡【已复现/源码确定】空地址可创建；省、市、区只检查分别存在，没有校验父子关系。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/address.py:23、43、143。
+已复现空 payload 写入 name/phone/address 均为空的地址。三个有效但互不相属的地区 ID 也能通过当前验证。订单只检查地址归属，不能排除无法履约的地址。
+建议：独立创建/更新输入模型；校验姓名、联系电话、详细地址和完整省市区链；名称从服务端地区记录计算，禁止客户端直接修改冗余名称。
+
+🟡【并发推导】默认地址的业务更新缺少共同的用户级互斥锁；并发设默认可能产生死锁或唯一键错误。数据库唯一索引能防双默认，因此这里的风险应表述为操作失败，而不是断言 MySQL 会持久化两个默认地址。
+
+8. 收藏与商品评价
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/favorite.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/reviews.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Favorite.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Reviews.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/components/product/ProductReviews.vue。
+已有措施：收藏按本人过滤；评价核对订单归属、商品一致和订单状态；订单行锁配合一单一评；回复仅管理员可写。
+
+🟡【源码确定】评价图片只要求 JSON 数组且最多 9 项，未约束每项必须为合法 URL 字符串，也未限制单项或整体长度；管理员 reply 同样缺少长度上限。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/reviews.py:128、36。
+建议：用有长度和来源约束的 URL/文件引用列表，验证上传所有权；对回复设置明确上限。
+
+🟡【源码确定】商品详情的“平均评分”取当前已加载评价均值，而评价总数取全量计数；加载更多会改变均分，不能代表商品全量评分。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/components/product/ProductReviews.vue:57。
+建议：后端返回全量 Avg/Count，列表分页与汇总统计分开。
+
+🟡【源码确定】收藏先查再插入，没有转换并发唯一键冲突，也未显式验证商品存在；建议返回幂等成功或清晰的 404/409，而非数据库级异常。全量收藏列表在数据增大后应分页。
+
+9. 文件上传与个人头像
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/files.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Person.vue；Goods/Admin/User 的上传组件。
+已有措施：扩展名与文件签名比对；UUID 文件名；路径类别白名单；分块写入；用户评价图限额和频率限制；磁盘操作下沉线程。
+
+🔴 R08【已复现】普通用户的“更换头像”功能不可用。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Person.vue:6、91；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/files.py:133。
+个人资料页给普通用户展示上传入口，调用 /files/upload?category=avatar；该接口只允许管理员，已复现 HTTP 403。
+建议：增加只允许本人头像类别的受限上传入口，并复用大小、类型和配额规则；不要直接将现有管理员通用上传接口开放给所有用户。
+
+🟡【源码确定】评价图片在上传后即永久占配额，取消评价或移除待提交图片只修改前端数组，没有服务端清理或引用回收。重复尝试最终会耗尽合法用户的 100MB 配额。
+建议：区分临时上传与已引用文件，回收超时未引用文件，并避免删除仍被评价引用的图片。
+
+10. 会话 API、消息持久化与聊天前端
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/chat.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Chat.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/composables/useChatStream.js。
+已有措施：会话归属包含角色和用户 ID；消息长度及调用频率有界；错误回答有用户提示；Markdown 输出经过 DOMPurify。
+
+🔴 R09【已复现】会话的角色隔离在调用 Agent 时丢失。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/chat.py:143；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/agent/harness.py:17；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/business.py:97；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/order/repository.py:24。
+聊天允许管理员，但 invoke 只传 user_id；工具对 User 订单也只按这个整数过滤。使用管理员 ID=1、用户 ID=1 的内存数据和确定性 Agent 替身，管理员会话取得了普通用户的订单。
+影响：管理员被错误当作同 ID 买家，个性化也混用该用户的数据；取消工具采用买家允许的状态集合，还可能绕过管理员 HTTP 状态机的限制。这不是声称普通用户能任意读取其他用户订单。
+建议：完整传递可信的角色+ID；买家工具明确要求 customer 角色，管理员使用单独的授权工具集；Grounding 和推荐画像也必须采用相同身份边界。
+
+🟡【源码确定】回答尚未返回时可切换会话，onContent 修改“当前 messages 的最后一条”，而不是请求所属会话的 assistant 消息。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Chat.vue:204、271。
+影响：A 会话的回答可能覆盖 B 会话当前显示的末条回答。建议绑定会话 ID 和消息 ID，切换时取消旧读取或隔离更新。
+
+🟡【源码确定】前端只加载默认第一页的 20 个会话和 50 条消息，没有翻页入口，更多历史内容实际不可达；后端发送消息也未显式推进 conversation.updated_at，列表排序无法可靠反映最后活动时间。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Chat.vue:168、204；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/chat.py:174。
+
+🟡【源码确定】SSE 客户端在连接结束时不要求收到 done，截断响应可能被当作成功；fetch 没有 AbortController 和统一 401 退出逻辑。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/composables/useChatStream.js:50。
+建议：区分“完整完成”和“流提前断开”，保留可重试状态。
+
+11. Agent 执行器、订单工具与回答校验
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/factory.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/agent/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/business.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/order/。
+已有措施：工具白名单；模型/工具调用次数上限；可信上下文由服务器注入；业务查询错误有降级文案；商品事实支持 MySQL 重建。
+
+🔴 R10【已复现】AI 取消已付款订单不退款，而且普通接口重试无法补回。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/order/repository.py:68；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/orders.py:52、167。
+AI 路径只恢复库存、改状态、写通知，未修改余额或插入退款流水。复现：余额 1000，购买 60 元后剩 940；AI 取消后状态已取消，余额仍 940，refund_count=0；再调用普通 DELETE 取消接口，只因“已取消”幂等返回，余额仍不恢复。
+建议：把取消状态校验、恢复库存、退款、通知、审计集中在共享订单领域服务，API 和工具统一调用；补已付款订单的 AI 取消及重复取消用例，并核对已有取消无退款记录。
+
+🔴 R11【已复现】取消授权检查把问题和任意订单目标当作已确认。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/business.py:47。
+_has_confirmed_cancel 只要当前文本包含“取消”等词就返回 True，不校验目标。测试中“怎么取消订单？”、“取消需要手续费吗？”均允许目标 999；“确认取消订单123”对目标 999 也返回 True。
+影响：模型误选工具或订单时，服务端兜底无法阻止误取消。该复现证明保护条件失效，不声称真实模型每次都会触发错误工具。
+建议：取消意图与目标订单绑定到服务端待确认动作，明确区分咨询、否定、执行指令；精确比较订单标识，不使用子串包含判断。
+
+🟡【源码确定】只要 Grounding 收集过商品证据，执行器就无条件将最终回答重建为商品列表。近期历史含蛋糕推荐后再问订单、时间或取消结果，也可能被这条路径覆盖。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/agent/grounding.py:48；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/agent/executor.py:234。
+建议：依据当前回答类型触发商品渲染，保留订单动作的结构化成功/失败结果；商品选择与其他业务回答不要共享一种强制输出格式。
+
+🟡【源码确定】usage 仅取 final_message，忽略此前产生工具调用的模型消息；耗时计时又不包含 Grounding。多轮 Agent 的 token 统计会低估。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/agent/executor.py:201、221。
+建议：汇总本次调用新产生的全部模型 usage，并分别记录检索、模型和总耗时。
+
+12. 知识文档与 RAG 存储
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/knowledge.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/vector_store.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/knowledge.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Knowledge.vue。
+已有措施：仅管理员操作；文件大小有上限；解析和 embedding 下沉线程；检索异常可降级。
+
+🟡【源码确定】上传先写 Chroma，再写 MySQL Knowledge。后一阶段失败会留下搜索可见、管理列表不可见的孤立知识；删除也是跨库双写，没有状态机或补偿。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/knowledge.py:42；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/vector_store.py:125。
+建议：采用文档状态和可重试索引任务，失败时补偿；持久化可重建的原始文档或规范化分块。当前原文件未保存，不能把文档索引视为随时可从 MySQL 重建的数据。
+
+🟡【源码确定】页面承诺最大 20MB，后端限制 10MB，两端约定不一致。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Knowledge.vue:110；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/knowledge.py:25。
+建议：统一文件上限，代理为 multipart 开销留余量。文档解析+embedding 的请求可能超过 Axios 全局 30 秒超时，宜改任务提交与状态查询。
+
+13. 商品索引 outbox 与索引管理
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/index_tasks.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/index.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/vector_store.py。
+已有措施：原子领取、租约 token、任务状态和次数、失败原因；MySQL 商品事实仍是权威。
+
+🔴 R12【已复现】耗尽重试次数的失败任务可永久挡住后续任务。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/index_tasks.py:87、28。
+run_pending 先按 ID 取前 100 个 pending/failed，但 process 拒绝 attempts>=3。前 100 个任务全部达到上限时，每次扫描都取这 100 个并全部跳过。已复现 processed=0，而第 101 个新任务一直 pending。
+建议：在候选查询中先应用 attempts<MAX 的过滤，再 limit；耗尽任务进入独立终态或单独重置重试次数。
+
+🟡【源码确定】全量重建先删除旧向量再生成 embedding；外部调用失败会留下空索引。单个任务租约也只保护任务记录，不能防止不同任务对同商品的旧结果后写覆盖新结果。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/vector_store.py:171；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/index_tasks.py:38。
+建议：先完成新版本索引再切换；商品级串行或版本校验避免旧数据覆盖；数量相等只能说明计数一致，不能证明索引内容健康。
+
+14. 搜索与个性化推荐
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/recommendation/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/product/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/goods.py:169；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/stats.py。
+已有措施：向量只负责召回，价格/库存回查数据库；向量失败可退到关键词/热销；推荐原因可解释。
+
+🟡【源码确定】客服先任取前 200 个商品，才做相关性排序，之后还在前 20 个候选上过滤预算。商品规模扩大时，存在的商品可能永远搜不到；有符合预算商品也可能错误返回无推荐。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/product/search.py:167、235。
+建议：先在数据库或检索层应用检索条件和硬约束，再限制候选数；候选总数与全库总数分开显示。
+
+🟡【源码确定】/goods/search 会调用付费 embedding，但没有 /chat/send、/qa/goods 同等级限流，也没有查询长度限制。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/goods.py:170；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/recommendation/semantic_search.py:25。
+建议：检索入口共享成本限流与并发限制，限制查询长度，对重复查询缓存。推荐路径中的全量商品/订单/评价扫描应使用聚合、有限候选和缓存；这些主要是规模增长风险，不是宣称当前小数据量已经缓慢。
+
+15. 商品详情、规格与单品 AI 问答
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/CakeDetail.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/components/product/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/qa.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/product_qa.py。
+已有措施：商品详情拆分组件；配料、保质期、价格和库存等常见问题优先确定性回答；问答历史和问题长度有限；模型失败回退数据库。
+
+🔴 R13【源码确定】规格可以选择和确认，但没有进入购物车或订单。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/CakeDetail.vue:66、286、298；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/models.py:113、310。
+selectedSpec 只保留在页面；addGoods 只发送 goodsId/num，立即购买也不发送规格；Cart 与 Orders 没有规格快照字段。选择不同尺寸最终形成同一种记录，履约端无法知道用户选择。
+建议：若规格可售卖，应建 SKU 或在订单中保存经过服务端校验的规格快照，并明确相应价格和库存；若仅为商品信息，不应呈现为会影响购买的可选控件。
+
+🟡【源码确定】未走确定性分支的问题，模型回答仅截断后就标记 ai_grounded，没有事实字段校验。因此“输入了事实”不能等同“输出已经事实验证”。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/product_qa.py:113；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/qa.py:75。
+建议：高风险事实继续走确定性渲染；自由问答可返回引用字段或结构化答案再验证，避免把提示词要求描述成程序保证。
+
+16. 首页统计、运营分析与报告
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/stats.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/ops.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/ops/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Home.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Ops.vue。
+已有措施：运营接口只允许管理员；销量聚合排除取消订单、采用成交快照；报告保留 facts；模型失败仍返回确定性报告。
+
+🟡 R14【已复现】汇总销量与日趋势使用不同时间窗口，图表合计不等于汇总。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/ops/analysis.py:73、192。
+SQL 使用 now-days 的滚动窗口；趋势只列今天及此前 days-1 个 UTC 日期。固定当前为 9 月 10 日 12:00 UTC，录入 18 小时前销量 2，查询 days=1，得到 total_qty=2，但唯一的日趋势点为 9 月 10 日 qty=0。门店使用上海时区，还存在日界线偏移。
+建议：一次计算门店时区的明确起止边界，转换 UTC 查询；汇总、上一窗口、趋势使用同一组边界，且测试断言日趋势之和与汇总一致。
+
+🟡【源码确定】切换商品或时间窗口不会清除已有 aiAnswer/reportId；旧分析的慢响应也可写入新选择的卡片。页面可能将 A 商品报告与 B 商品选择并列展示。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Ops.vue:263、293。
+建议：报告与 goods_id/days 绑定，条件改变时失效；请求使用序号或取消控制，拒绝旧响应覆盖。
+
+💭【业务口径】inventory_value 用库存×零售价计算，却展示为资金占用。原始代码没有采购成本字段，因此它表示按售价估值，不代表真实成本或占款。可先改标签，或明确引入成本模型。
+
+17. 公告、站内通知与审计
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/notice.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/notification.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/domain/notifications.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/common/audit.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/Manager.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Notice.vue。
+已有措施：通知按角色+ID 过滤；状态变更与通知同事务；已读接口幂等；后台敏感操作有审计调用。
+
+🟡 R15【已复现】公告翻页参数不一致。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Notice.vue:96；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/notice.py:64。
+前端发送 pageNum/pageSize，后端接收 page_num/page_size。造 12 条公告后，以 pageNum=1 和 2、pageSize=10 请求，均返回相同的 5 条。
+建议：统一参数或声明兼容别名，并用前端实际参数进行 HTTP 回归。
+
+🟡【源码确定】审计为业务提交后的 best-effort；进程在业务成功后退出、或审计写失败，会丢记录。AI 取消路径也没有 record_audit。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/common/audit.py:35；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/tools/order/repository.py:74。
+建议：对必须完整留痕的资金/权限操作使用事务内审计或 outbox；如果继续 best-effort，应明确这不是强一致审计。其余通知归属控制未发现可确认的越权缺陷。
+
+18. 前端路由、请求层与共享状态
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/router/index.js；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/utils/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/stores/cart.js；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/Manager.vue；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/main.js。
+已有措施：统一 Axios token 注入与 HTTP 401 清理；图片相对 URL 统一转换；路由懒加载；轮询监听器卸载时清理。
+
+🟡【源码确定】退出登录只清 localStorage，没有 reset Pinia 购物车 store。SPA 中换账号后旧 items/selectedItems 仍保留，直到新账户的 loadCart 成功；请求失败时旧列表可能继续显示。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/Manager.vue:473；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/stores/cart.js:8、37。
+建议：登出、401、改密和切换账号时统一清理用户级 store，并对迟到请求校验账号身份。
+
+🟡【源码确定】路由只判断 token 是否存在，没有角色路由元信息和强制改密的全局导航控制。后端鉴权仍然阻止实际越权，所以这里主要是错误页面、403 和导航体验问题，不应误报成“改 localStorage 就获得管理员权限”。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/router/index.js:39。
+
+💭 构建成功，但依赖包体积较大。可根据首屏实测决定是否减少全量 Element Plus/图标注册；不建议仅为消除警告冒险拆分存在初始化依赖的库。
+
+19. 数据模型与 SQL 迁移
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/models.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/。
+已有措施：数据库层唯一性和 CHECK；审计业务外键 RESTRICT；默认关闭模拟充值。
+
+🔴 R16【源码确定】生产首次部署也会导入固定演示管理员凭据。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/seed_base.sql:25；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/migrate.sh:143。
+迁移导入 seed 不检查 APP_ENV，生产环境也会经过相同路径。强制首次改密只限制登录后操作，不能防止知道公开演示密码的人先登录并完成改密。
+建议：将公共分类/地区种子与演示账号分开，生产禁用演示账号；初始化管理员使用一次性随机凭据或受控引导流程。
+
+🔴 R17【条件性源码确定】迁移只用 orders 是否存在判断“新库”，可能误执行含 DROP TABLE 的基础导入。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/migrate.sh:129、138；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/cake_store.sql:54、80。
+若部分初始化/恢复后的数据库已有账号、商品等表但缺 orders，执行迁移会删除并重建既有表。代码写入了 __cake_store.sql 标记，却未用它保护该分支。
+建议：只允许对确认完全空白的目标库导入基础 schema；部分存在时直接停止并给出缺失清单。存量升级使用前向迁移，避免自动执行破坏性 dump。
+
+🟡【源码确定】迁移以整文件完成才记账，DDL 不是事务；011/014 等执行到一半中断，重跑会遇到重复列或重复约束。011 的时间 UPDATE 与标记 INSERT 也不是一个原子事务。
+建议：在独立测试库验证从零安装、升级和每阶段中断恢复；使用迁移工具或显式的可重入步骤与结构前置检查。未实际执行本项目 MySQL 迁移，因此不声称已复现部署失败。
+
+20. 数据填充脚本与测试体系
+
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/scripts/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/tests/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/.github/workflows/ci.yml；/Users/xiaohao/Python/Cake_store/samrt_cake_store/start.command；/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/package.json。
+现有测试覆盖了钱包普通取消退款、购物车顺序结算与回滚、归属过滤、强制改密、文件类型、推荐降级等，均有实际价值；本次全部通过。
+
+🟡【源码确定】测试主要使用 SQLite generate_schemas 或 Mock，未覆盖 MySQL 迁移独有的 CHECK、生成列唯一约束和真实行锁。测试订单工具只检查状态和库存，未验证余额及退款；CI 前端只构建，没有页面请求契约测试。
+建议按风险补测试：
+（1）API 与 Agent 共用的已付款订单取消、幂等退款和审计。
+（2）两个独立 MySQL 连接并发结算同一购物车、同一购买请求重试。
+（3）商品列表→编辑→提交；用户重置密码；头像上传；公告翻页的真实 payload。
+（4）管理员/用户数字 ID 重叠时的聊天工具隔离，以及取消意图与目标绑定。
+（5）SQL 零价边界、索引失败任务饥饿、统计窗口边界。
+（6）聊天切换中返回、运营分析切换中返回、退出后登录另一个账号。
+
+🟡【源码确定】seed_goods 按原演示数据覆盖已有商品库存和价格；seed_analysis_data 使用当前数据库用户写演示订单、评价并重设库存，还可能用其他用户的地址作兜底。这些脚本没有生产环境拒绝条件。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/scripts/seed_goods.py:350；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/scripts/seed_analysis_data.py:85、161、209。
+建议：要求独立测试库或显式演示环境标记；种子数据保留归属约束、时间语义和可重复执行边界。审查中未执行这些填充脚本。
+
+修复次序建议：先统一订单领域服务，处理 AI 漏退款、身份和取消授权，再解决购买/结算幂等；随后修正商品编辑、密码重置、头像、规格和公告的前后端契约；再补索引恢复、统计边界、迁移恢复和测试。生产部署前还需处理日志密码泄漏及固定演示账号。
+
+范围说明：这是当前源码级逐模块审查，不是无缺陷证明。没有参考既有项目 Markdown 审查记录，也没有用注释中的“已保证”“原子”“幂等”等声明代替实现证据；未将未实测的 MySQL 并发、外部模型表现或部署状态表述成已验证事实。

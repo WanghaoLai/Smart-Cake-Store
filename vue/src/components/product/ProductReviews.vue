@@ -41,7 +41,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ChatLineSquare, Service } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 
@@ -50,13 +50,11 @@ const emit = defineEmits(['loaded'])
 
 const reviews = ref([])
 const total = ref(0)
+const averageRating = ref(0)
 const pageNum = ref(1)
 const loading = ref(false)
 const PAGE_SIZE = 10
 
-const averageRating = computed(() => reviews.value.length
-  ? reviews.value.reduce((sum, review) => sum + (review.rating || 0), 0) / reviews.value.length
-  : 0)
 const fallbackAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
 
 const load = () => {
@@ -67,6 +65,7 @@ const load = () => {
       if (res.code === '200') {
         reviews.value.push(...(res.data?.list || []))
         total.value = res.data?.total || 0
+        averageRating.value = Number(res.data?.averageRating || 0)
         pageNum.value += 1
         emit('loaded', total.value)
       }

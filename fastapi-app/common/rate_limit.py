@@ -14,19 +14,42 @@ class SlidingWindowRateLimiter:
         self.window_seconds = window_seconds
         self._events: dict[str, deque] = defaultdict(deque)
         self._lock = Lock()
+        self._operations = 0
+
+    def _prune_locked(self, cutoff: float) -> None:
+        for key, events in list(self._events.items()):
+            while events and events[0] <= cutoff:
+                events.popleft()
+            if not events:
+                self._events.pop(key, None)
 
     def allow(self, key: str, now: float | None = None) -> bool:
         """窗口内第 max_events 次以内放行并记账，超出则拒绝。"""
         now = time.monotonic() if now is None else now
         with self._lock:
-            events = self._events[key]
+            self._operations += 1
             cutoff = now - self.window_seconds
+            # 摊销清理所有长期不用的主体；当前 key 每次仍立即清理。
+            if self._operations % 256 == 0:
+                self._prune_locked(cutoff)
+            events = self._events[key]
             while events and events[0] <= cutoff:
                 events.popleft()
             if len(events) >= self.max_events:
                 return False
             events.append(now)
             return True
+
+    def prune(self, now: float | None = None) -> None:
+        """主动回收过期主体，便于低流量进程定时维护和确定性测试。"""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            self._prune_locked(now - self.window_seconds)
+
+    @property
+    def tracked_keys(self) -> int:
+        with self._lock:
+            return len(self._events)
 
     def reset(self, key: str) -> None:
         """清除一个主体的失败窗口。

@@ -21,7 +21,7 @@
         <div class="upload-icon"><el-icon><Upload /></el-icon></div>
         <div class="upload-body">
           <div class="upload-title">{{ data.uploading ? '上传中...' : '点击或拖拽上传文档' }}</div>
-          <div class="upload-sub">支持 .txt .pdf .docx 格式，单文件 ≤ 20MB</div>
+          <div class="upload-sub">支持 .txt .pdf .docx 格式，单文件 ≤ 10MB</div>
         </div>
         <el-button v-if="data.uploading" type="primary" loading round>上传中</el-button>
       </div>
@@ -107,8 +107,8 @@ const tryUpload = async (file) => {
     ElMessage.error('仅支持 .txt .pdf .docx 格式')
     return
   }
-  if (file.size > 20 * 1024 * 1024) {
-    ElMessage.error('文件大小不能超过 20MB')
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.error('文件大小不能超过 10MB')
     return
   }
 
@@ -117,7 +117,8 @@ const tryUpload = async (file) => {
   formData.append('file', file)
   try {
     const res = await request.post('/knowledge/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
     })
     if (res.code === '200') {
       ElMessage.success('文档上传成功，已构建知识库')

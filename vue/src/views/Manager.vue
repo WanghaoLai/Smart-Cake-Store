@@ -303,7 +303,7 @@ import {
   SwitchButton, Cherry, Grid, Coin, Refrigerator, Avatar, Position, SoldOut,
   Location, Monitor, Document, Star, ChatLineSquare, ShoppingCart,
   Sunset, Present, GobletSquare, MagicStick, Watch, Medal, Trophy,
-  DataAnalysis, TrendCharts, Bell,
+  DataAnalysis, TrendCharts, Bell, Goods,
 } from "@element-plus/icons-vue";
 import request from "@/utils/request";
 import { useCartStore } from "@/stores/cart";
@@ -448,10 +448,18 @@ onMounted(() => {
   loadUnreadCount()
   notifTimer = window.setInterval(loadUnreadCount, 60 * 1000)
   if (data.user.role === '用户') cartStore.loadCount()
+  window.addEventListener('session-cleared', resetUserState)
 })
 onUnmounted(() => {
   if (notifTimer) window.clearInterval(notifTimer)
+  window.removeEventListener('session-cleared', resetUserState)
 })
+
+function resetUserState() {
+  cartStore.$reset()
+  notif.list = []
+  notif.unread = 0
+}
 
 if (!data.user?.id) {
   ElMessage.error('请登录！')
@@ -470,6 +478,7 @@ const handleCommand = (cmd) => {
       cancelButtonText: '取消',
     }).then(() => {
       ElMessage.success('退出成功')
+      resetUserState()
       localStorage.removeItem('token')
       localStorage.removeItem('system-user')
       router.push('/login')

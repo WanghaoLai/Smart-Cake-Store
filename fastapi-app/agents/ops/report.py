@@ -76,7 +76,8 @@ def build_product_markdown(facts: dict, summary: str | None) -> str:
     out += [
         f"- 水位分布：健康 {levels.get('健康', 0)} / 偏低 {levels.get('偏低', 0)} / "
         f"紧张 {levels.get('紧张', 0)} / 售罄 {levels.get('售罄', 0)}",
-        f"- 库存资金占用 ¥{inv.get('total_inventory_value', 0)}，预警商品 {inv.get('warning_count', 0)} 个",
+        f"- 按当前零售价估算的库存货值 ¥{inv.get('total_inventory_value', 0)}"
+        f"（库存 × 当前零售价，非采购成本），预警商品 {inv.get('warning_count', 0)} 个",
         "",
         "### 预警商品清单",
         "",

@@ -153,8 +153,8 @@
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="保质期" prop="shelf_life">
-                  <el-input v-model="data.form.shelf_life" autocomplete="off" placeholder="如：冷藏 24 小时内食用" />
+                <el-form-item label="保质期" prop="shelfLife">
+                  <el-input v-model="data.form.shelfLife" autocomplete="off" placeholder="如：冷藏 24 小时内食用" />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -173,6 +173,7 @@
 </template>
 
 <script setup>
+import { goodsPayload } from "@/utils/goodsPayload.mjs"
 import { reactive, ref, watch } from "vue";
 import request from "@/utils/request";
 import { fileUrl } from "@/utils/fileUrl";
@@ -233,7 +234,7 @@ const handleAdd = () => {
 }
 
 const handleEdit = (row) => {
-  data.form = JSON.parse(JSON.stringify(row))
+  data.form = goodsPayload(row)
   // 上传组件预览需要绝对地址；表单里存的仍是相对路径
   data.fileList = row.img ? [{ name: 'img', url: fileUrl(row.img) }] : []
   data.formVisible = true
@@ -248,13 +249,13 @@ const handleDelete = (id) => {
 }
 
 const add = () => {
-  request.post('/goods/add', data.form).then(res => {
+  request.post('/goods/add', goodsPayload(data.form)).then(res => {
     if (res.code === '200') { ElMessage.success('操作成功'); data.formVisible = false; load() } else { ElMessage.error(res.msg) }
   })
 }
 
 const update = () => {
-  request.put('/goods/update', data.form).then(res => {
+  request.put('/goods/update', goodsPayload(data.form)).then(res => {
     if (res.code === '200') { ElMessage.success('操作成功'); data.formVisible = false; load() } else { ElMessage.error(res.msg) }
   })
 }

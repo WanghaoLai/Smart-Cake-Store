@@ -2,7 +2,7 @@
 
 覆盖 roadmap 改进项 4 的核心不变量：
   - 敏感操作成功后审计记录落库（操作者/动作/目标/明细）
-  - 审计写入失败绝不阻塞业务（best-effort + 日志兜底）
+  - 权限变更与审计同事务，审计失败时业务也回滚
   - 状态机拒绝的变更不留审计噪声
   - 归属字段（operator_role/operator_id）取自当前操作者"""
 import unittest
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 from tortoise import Tortoise
 
 from api.orders import update_status as order_update_status
-from api.user import UserCreate, reset_password
+from api.user import PasswordResetRequest, reset_password
 from common.exception_handler import ConflictException
 from models import Address, AuditLog, Goods, Orders, User
 
@@ -34,7 +34,10 @@ class AuditLogTests(unittest.IsolatedAsyncioTestCase):
         await Tortoise.init(db_url="sqlite://:memory:", modules={"models": ["models"]})
         await Tortoise.generate_schemas()
         await User.create(id=ADMIN["user_id"], username="admin", role="管理员")
-        await User.create(id=USER["user_id"], username="buyer", role="用户")
+        await User.create(
+            id=USER["user_id"], username="buyer", role="用户",
+            must_change_password=False,
+        )
         self.goods = await Goods.create(
             id=1, name="测试蛋糕", price=Decimal("98.00"), num=10, unit="份"
         )
@@ -52,7 +55,7 @@ class AuditLogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reset_password_writes_audit_with_operator_and_ip(self):
         await reset_password(
-            USER["user_id"], UserCreate(username="buyer", password="strong-pass-9"),
+            USER["user_id"], PasswordResetRequest(password="strong-pass-9"),
             ADMIN, FakeRequest(),
         )
         log = await AuditLog.all().first()
@@ -63,18 +66,19 @@ class AuditLogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(log.target_id, USER["user_id"])
         self.assertEqual(log.ip, "10.0.0.8")
 
-    async def test_audit_failure_does_not_block_business(self):
-        """审计写入异常时业务必须已成功——审计是 best-effort，不是事务参与者。"""
+    async def test_required_audit_failure_rolls_back_permission_change(self):
+        """权限审计写入异常时，密码和令牌版本必须随事务一起回滚。"""
         with patch.object(
             AuditLog, "create", new=AsyncMock(side_effect=RuntimeError("audit table gone")),
         ):
-            await reset_password(
-                USER["user_id"], UserCreate(username="buyer", password="strong-pass-9"),
-                ADMIN,
-            )
+            with self.assertRaises(RuntimeError):
+                await reset_password(
+                    USER["user_id"], PasswordResetRequest(password="strong-pass-9"),
+                    ADMIN,
+                )
         user = await User.get(id=USER["user_id"])
-        self.assertTrue(user.must_change_password, "密码重置业务不应被审计失败回滚")
-        self.assertEqual(user.token_version, 1, "token_version 递增证明 UPDATE 已生效")
+        self.assertFalse(user.must_change_password, "审计失败后密码重置标记必须回滚")
+        self.assertEqual(user.token_version, 0, "审计失败后令牌版本必须回滚")
 
     async def test_order_status_change_audited_with_transition(self):
         await order_update_status(1, "已发货", ADMIN, FakeRequest())

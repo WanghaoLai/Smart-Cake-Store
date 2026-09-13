@@ -107,7 +107,7 @@ class KnowledgeService:
                 raise Exception(f"Embedding 调用失败: {response.message}")
         return embeddings
 
-    def add_document(self, file_bytes: bytes, filename: str) -> dict:
+    def add_document(self, file_bytes: bytes, filename: str, doc_id: str | None = None) -> dict:
         text = self.parse_file(file_bytes, filename)
         if not text.strip():
             raise ValueError("文档内容为空，无法解析")
@@ -117,7 +117,7 @@ class KnowledgeService:
             raise ValueError("文档分块后无有效内容")
 
         embeddings = self._get_embeddings(chunks)
-        doc_uuid = uuid.uuid4().hex
+        doc_uuid = doc_id or uuid.uuid4().hex
         ids = [f"{doc_uuid}_{i}" for i in range(len(chunks))]
         metadatas = [{"doc_id": doc_uuid, "filename": filename, "chunk_index": i, "type": "document"}
                      for i in range(len(chunks))]
@@ -153,36 +153,24 @@ class KnowledgeService:
         embedding = self._get_embeddings([doc])
         goods_id = str(goods.id)
 
-        existing = self.goods_collection.get(where={"goods_id": goods_id})
-        if existing.get("ids"):
-            self.goods_collection.update(
-                ids=existing["ids"],
-                embeddings=embedding,
-                documents=[doc],
-            )
-        else:
-            self.goods_collection.add(
-                ids=[f"goods_{goods_id}"],
-                embeddings=embedding,
-                documents=[doc],
-                metadatas=[{"goods_id": goods_id, "type": "goods", "name": goods.name}],
-            )
+        self.goods_collection.upsert(
+            ids=[f"goods_{goods_id}"], embeddings=embedding, documents=[doc],
+            metadatas=[{"goods_id": goods_id, "type": "goods", "name": goods.name}],
+        )
 
     def sync_all_goods(self, goods_list: list):
         """全量重建商品向量索引"""
-        existing = self.goods_collection.get(where={"type": "goods"})
-        if existing.get("ids"):
-            self.goods_collection.delete(ids=existing["ids"])
-
-        if not goods_list:
-            return
-
         docs = [self._format_goods_doc(g) for g in goods_list]
-        embeddings = self._get_embeddings(docs)
+        embeddings = self._get_embeddings(docs) if docs else []
         ids = [f"goods_{g.id}" for g in goods_list]
         metadatas = [{"goods_id": str(g.id), "type": "goods", "name": g.name} for g in goods_list]
-
-        self.goods_collection.add(ids=ids, embeddings=embeddings, documents=docs, metadatas=metadatas)
+        # 所有外部 embedding 均成功后才改现有集合；先 upsert 新版本，再删旧 ID。
+        if ids:
+            self.goods_collection.upsert(ids=ids, embeddings=embeddings, documents=docs, metadatas=metadatas)
+        existing = self.goods_collection.get(where={"type": "goods"})
+        stale_ids = sorted(set(existing.get("ids") or []) - set(ids))
+        if stale_ids:
+            self.goods_collection.delete(ids=stale_ids)
         logger.info(f"商品向量索引已重建，共 {len(goods_list)} 条")
 
     def remove_goods(self, goods_id: int):

@@ -1,118 +1,48 @@
+import uuid
 import unittest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from decimal import Decimal
+from unittest.mock import patch, AsyncMock
+from tortoise import Tortoise
+from models import User, Goods, Address, Orders, WalletTransaction, AuditLog, Notification
+from api.orders import add, delete, OrdersCreatePydantic
+from agents.tools.order.repository import cancel_order
 
-from agents.tools.order.repository import ORDER_CANCELLED, cancel_order
-
-
-class AsyncTransaction:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, traceback):
-        return False
-
-
-class LockedQuery:
-    def __init__(self, row):
-        self.row = row
-
-    def select_for_update(self):
-        return self
-
-    async def first(self):
-        return self.row
-
-
+USER = {"user_id":7,"role":"用户"}
 class CancelOrderRepositoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_cancel_marks_order_and_restores_inventory_atomically(self):
-        order = SimpleNamespace(
-            id=9,
-            order_no="202608130001",
-            status="待发货",
-            goods_id=3,
-            num=2,
-            save=AsyncMock(),
-        )
-        goods = SimpleNamespace(name="草莓蛋糕", num=5, save=AsyncMock())
-
-        notify = AsyncMock()
-        with patch(
-            "agents.tools.order.repository.in_transaction",
-            return_value=AsyncTransaction(),
-        ), patch(
-            "agents.tools.order.repository.Orders.filter",
-            return_value=LockedQuery(order),
-        ), patch(
-            "agents.tools.order.repository.Goods.filter",
-            return_value=LockedQuery(goods),
-        ), patch(
-            "agents.tools.order.repository.notify_order_event", notify,
-        ):
-            result = await cancel_order(user_id=7, order_no="202608130001")
-
-        self.assertEqual(order.status, ORDER_CANCELLED)
-        order.save.assert_awaited_once_with(update_fields=["status"])
-        self.assertEqual(goods.num, 7)
-        goods.save.assert_awaited_once_with(update_fields=["num"])
-        self.assertIn("库存已恢复", result)
-        # 取消成功必须伴随买家通知（同事务）
-        notify.assert_awaited_once_with(order, goods.name)
-
-    async def test_repeated_cancel_does_not_restore_inventory_twice(self):
-        order = SimpleNamespace(
-            id=9,
-            order_no="202608130001",
-            status=ORDER_CANCELLED,
-            goods_id=3,
-            num=2,
-            save=AsyncMock(),
-        )
-        goods_filter = MagicMock()
-
-        with patch(
-            "agents.tools.order.repository.in_transaction",
-            return_value=AsyncTransaction(),
-        ), patch(
-            "agents.tools.order.repository.Orders.filter",
-            return_value=LockedQuery(order),
-        ), patch("agents.tools.order.repository.Goods.filter", goods_filter), patch(
-            "agents.tools.order.repository.notify_order_event", AsyncMock(),
-        ):
-            result = await cancel_order(user_id=7, order_no="202608130001")
-
-        goods_filter.assert_not_called()
-        order.save.assert_not_awaited()
-        self.assertIn("已经取消", result)
-
-    async def test_missing_goods_keeps_order_active(self):
-        order = SimpleNamespace(
-            id=9,
-            order_no="202608130001",
-            status="待发货",
-            goods_id=3,
-            num=2,
-            save=AsyncMock(),
-        )
-
-        with patch(
-            "agents.tools.order.repository.in_transaction",
-            return_value=AsyncTransaction(),
-        ), patch(
-            "agents.tools.order.repository.Orders.filter",
-            return_value=LockedQuery(order),
-        ), patch(
-            "agents.tools.order.repository.Goods.filter",
-            return_value=LockedQuery(None),
-        ), patch(
-            "agents.tools.order.repository.notify_order_event", AsyncMock(),
-        ):
-            result = await cancel_order(user_id=7, order_no="202608130001")
-
-        self.assertEqual(order.status, "待发货")
-        order.save.assert_not_awaited()
-        self.assertIn("避免库存不一致", result)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    async def asyncSetUp(self):
+        await Tortoise.init(db_url="sqlite://:memory:",modules={"models":["models"]})
+        await Tortoise.generate_schemas()
+        await User.create(id=7,username="buyer",balance=100)
+        self.goods = await Goods.create(name="蛋糕",price=60,num=5)
+        self.address = await Address.create(user_id=7,address="原地址")
+        await add(OrdersCreatePydantic(request_id=uuid.uuid4().hex, goodsId=self.goods.id,addressId=self.address.id,num=1),USER)
+        self.order = await Orders.all().first()
+    async def asyncTearDown(self):
+        await Tortoise.close_connections()
+    async def test_agent_and_api_refund_once(self):
+        result = await cancel_order(7,order_id=self.order.id)
+        self.assertIn("已成功取消", result)
+        await delete(self.order.id,USER)
+        self.assertEqual((await User.get(id=7)).balance,Decimal(100))
+        self.assertEqual((await Goods.get(id=self.goods.id)).num,5)
+        self.assertEqual(await WalletTransaction.filter(type="refund").count(),1)
+        self.assertEqual(await AuditLog.all().count(),1)
+        self.assertEqual(await Notification.all().count(),1)
+    async def test_historical_cancel_refunds_without_restoring_twice(self):
+        await Orders.filter(id=self.order.id).update(status="已取消")
+        await Goods.filter(id=self.goods.id).update(num=5)
+        await cancel_order(7,order_id=self.order.id)
+        await cancel_order(7,order_id=self.order.id)
+        self.assertEqual((await User.get(id=7)).balance,Decimal(100))
+        self.assertEqual((await Goods.get(id=self.goods.id)).num,5)
+    async def test_refund_failure_rolls_back_all_changes(self):
+        with patch("domain.order_cancellation.WalletTransaction.create",AsyncMock(side_effect=RuntimeError("fail"))):
+            with self.assertRaises(RuntimeError):
+                await cancel_order(7,order_id=self.order.id)
+        self.assertEqual((await Orders.get(id=self.order.id)).status,"待发货")
+        self.assertEqual((await Goods.get(id=self.goods.id)).num,4)
+        self.assertEqual((await User.get(id=7)).balance,Decimal(40))
+        self.assertEqual(await Notification.all().count(),0)
+    async def test_other_user_cannot_cancel(self):
+        self.assertIn("未找到",await cancel_order(8,order_id=self.order.id))
+        self.assertEqual((await Orders.get(id=self.order.id)).status,"待发货")

@@ -92,7 +92,13 @@ async def recharge(data: RechargeRequest, current_user: dict = Depends(get_curre
     except IntegrityError:
         # 客户端超时重试时保持幂等；同一 request_id 不会重复入账。
         existing = await WalletTransaction.get_or_none(request_id=request_id)
-        if existing and existing.user_id == current_user["user_id"] and existing.type == "recharge":
+        if (
+            existing
+            and existing.user_id == current_user["user_id"]
+            and existing.type == "recharge"
+            and _money(existing.amount) == amount
+            and existing.payment_method == method
+        ):
             user = await User.get(id=current_user["user_id"])
             return Result.success(_summary(user))
         raise ConflictException("充值请求已被使用，请重新发起")

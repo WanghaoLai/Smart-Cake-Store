@@ -61,7 +61,7 @@ class GoodsQaTests(unittest.IsolatedAsyncioTestCase):
             result = await ask_goods(
                 GoodsQuestion(goods_id=1, question="这款适合什么场合？", history=[]), USER,
             )
-        self.assertEqual(result.data["source"], "ai_grounded")
+        self.assertEqual(result.data["source"], "ai_assisted_unverified")
         facts = generate.await_args.args[2]
         self.assertEqual(facts.goods_id, 1)
         self.assertIn("实时库存", facts.fields)

@@ -87,8 +87,8 @@ def analysis_tools() -> list[BaseTool]:
         days: int = 30,
         runtime: ToolRuntime[AgentContext] = None,
     ) -> str:
-        """分析全店库存：库存水位分布（健康/偏低/紧张/售罄）、库存资金占用、
-        预警商品清单（补货紧急或可售天数不足）。"""
+        """分析全店库存：库存水位分布（健康/偏低/紧张/售罄）、按当前零售价
+        估算的库存货值（不代表采购成本）、预警商品清单。"""
         try:
             return _fmt(await inventory_analysis(days))
         except Exception:
