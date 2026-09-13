@@ -6,7 +6,7 @@ from api.orders import add, select, OrdersCreatePydantic
 from api.cart import checkout, CartCheckoutPydantic
 from agents.tools.order.repository import get_order_status
 from common.exception_handler import ConflictException, NotFoundException
-from models import User, Goods, Address, Cart, Orders, WalletTransaction, PurchaseRequest
+from models import User, Goods, Address, Cart, Orders, WalletTransaction
 
 USER={"user_id":7,"role":"用户"}
 class PurchaseIntegrityTests(unittest.IsolatedAsyncioTestCase):

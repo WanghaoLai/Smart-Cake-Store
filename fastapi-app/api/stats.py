@@ -3,7 +3,7 @@ from tortoise.functions import Sum
 
 from agents.recommendation import recommend
 from api.orders import ORDER_CANCELLED, ORDER_PENDING, ORDER_SHIPPED
-from common.auth import get_current_user, get_current_admin
+from common.auth import get_current_user
 from common.result import Result
 from models import Goods, Orders, Notice, Favorite
 

@@ -14,7 +14,7 @@ from common.exception_handler import CustomException
 from common.pagination import clamp_page
 from common.result import Result, PageInfo
 from common.time import format_store_time, utc_now
-from models import Review, Orders, Goods
+from models import Review, Orders
 from domain.order_status import ORDER_PENDING_REVIEW, ORDER_RECEIVED, ORDER_REVIEWED
 
 router = APIRouter(prefix="/reviews", dependencies=[Depends(get_current_user)])

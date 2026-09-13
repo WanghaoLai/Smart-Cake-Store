@@ -359,7 +359,6 @@ async def upsert_goods():
     print(f"待写入商品数：{len(GOODS)}")
 
     inserted = 0
-    updated = 0
     skipped = 0
     img_counter = {}
 

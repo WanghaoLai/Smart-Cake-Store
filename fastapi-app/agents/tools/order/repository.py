@@ -1,10 +1,6 @@
 """Authenticated order reads and transactional order mutations."""
 
-from tortoise.transactions import in_transaction
-
-from domain.notifications import notify_order_event
-from models import Goods, Orders
-from domain.order_status import CANCELLABLE_STATUSES, ORDER_CANCELLED, ORDER_PENDING
+from models import Orders
 from domain.purchase import shipping
 from common.time import format_store_time
 

@@ -11,7 +11,7 @@
 【建议】质量改进或需要业务决策的边界，不表述为已发生事故。
 🔴 为资金、安全、数据完整性或关键功能阻塞；🟡 为建议修复；💭 为低优先级改进。
 
-验证：本次重新运行后端测试，134 passed、6 subtests passed，21 个 pk 弃用警告；Vue 生产构建成功，Element Plus 分包约 902 kB（gzip 约 277 kB），存在体积警告。额外复现使用临时脚本，关闭外部模型凭据，仅连接 SQLite 内存数据库，没有执行真实数据库迁移、Docker 部署或外部模型调用；未做浏览器端到端验证。测试通过不能证明以下缺陷不存在。
+验证：本次重新运行后端测试，134 passed、6 subtests passed，21 个 pk 弃用警告；Vue 生产构建成功，Element Plus 分包约 902 kB（gzip 约 277 kB），存在体积警告。额外复现使用临时脚本，关闭外部模型凭据，仅连接 SQLite 内存数据库，没有执行真实数据库迁移或外部模型调用；未做浏览器端到端验证。测试通过不能证明以下缺陷不存在。
 
 1. 应用入口、公共认证、错误处理与限流
 
@@ -202,8 +202,8 @@ _has_confirmed_cancel 只要当前文本包含“取消”等词就返回 True�
 位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/knowledge.py:42；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/agents/rag/vector_store.py:125。
 建议：采用文档状态和可重试索引任务，失败时补偿；持久化可重建的原始文档或规范化分块。当前原文件未保存，不能把文档索引视为随时可从 MySQL 重建的数据。
 
-🟡【源码确定】页面承诺最大 20MB，后端限制 10MB，Docker Nginx 请求体也为 10m；接近 10MB 的文件加 multipart 开销还可能被代理提前拒绝。
-位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Knowledge.vue:110；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/knowledge.py:25；/Users/xiaohao/Python/Cake_store/samrt_cake_store/docker/nginx.conf:7。
+🟡【源码确定】页面承诺最大 20MB，后端限制 10MB，两端约定不一致。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/vue/src/views/manager/Knowledge.vue:110；/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/api/knowledge.py:25。
 建议：统一文件上限，代理为 multipart 开销留余量。文档解析+embedding 的请求可能超过 Axios 全局 30 秒超时，宜改任务提交与状态查询。
 
 13. 商品索引 outbox 与索引管理
@@ -291,14 +291,14 @@ SQL 使用 now-days 的滚动窗口；趋势只列今天及此前 days-1 个 UTC
 
 💭 构建成功，但依赖包体积较大。可根据首屏实测决定是否减少全量 Element Plus/图标注册；不建议仅为消除警告冒险拆分存在初始化依赖的库。
 
-19. 数据模型、SQL 迁移与部署配置
+19. 数据模型与 SQL 迁移
 
-范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/models.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/；/Users/xiaohao/Python/Cake_store/samrt_cake_store/Dockerfile；/Users/xiaohao/Python/Cake_store/samrt_cake_store/Dockerfile.frontend；/Users/xiaohao/Python/Cake_store/samrt_cake_store/docker-compose.yml；/Users/xiaohao/Python/Cake_store/samrt_cake_store/docker/nginx.conf。
-已有措施：数据库层唯一性和 CHECK；审计业务外键 RESTRICT；Docker 非 root API、只读根文件系统、显式持久卷；默认关闭模拟充值。
+范围：/Users/xiaohao/Python/Cake_store/samrt_cake_store/fastapi-app/models.py；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/。
+已有措施：数据库层唯一性和 CHECK；审计业务外键 RESTRICT；默认关闭模拟充值。
 
 🔴 R16【源码确定】生产首次部署也会导入固定演示管理员凭据。
-位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/seed_base.sql:25；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/migrate.sh:143；/Users/xiaohao/Python/Cake_store/samrt_cake_store/docker-compose.yml:4。
-迁移导入 seed 不检查 APP_ENV，而 compose 默认 production。强制首次改密只限制登录后操作，不能防止知道公开演示密码的人先登录并完成改密。
+位置：/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/seed_base.sql:25；/Users/xiaohao/Python/Cake_store/samrt_cake_store/db/migrate.sh:143。
+迁移导入 seed 不检查 APP_ENV，生产环境也会经过相同路径。强制首次改密只限制登录后操作，不能防止知道公开演示密码的人先登录并完成改密。
 建议：将公共分类/地区种子与演示账号分开，生产禁用演示账号；初始化管理员使用一次性随机凭据或受控引导流程。
 
 🔴 R17【条件性源码确定】迁移只用 orders 是否存在判断“新库”，可能误执行含 DROP TABLE 的基础导入。
@@ -308,8 +308,6 @@ SQL 使用 now-days 的滚动窗口；趋势只列今天及此前 days-1 个 UTC
 
 🟡【源码确定】迁移以整文件完成才记账，DDL 不是事务；011/014 等执行到一半中断，重跑会遇到重复列或重复约束。011 的时间 UPDATE 与标记 INSERT 也不是一个原子事务。
 建议：在独立测试库验证从零安装、升级和每阶段中断恢复；使用迁移工具或显式的可重入步骤与结构前置检查。未实际执行本项目 MySQL 迁移，因此不声称已复现部署失败。
-
-🟡【部署建议】API Docker HEALTHCHECK 只检查 /health 进程存活，不检查数据库可用性。项目已有 /health/db，可用于 readiness；同时应在真实代理链路验证客户端 IP 是否正确传递到登录限流器。
 
 20. 数据填充脚本与测试体系
 

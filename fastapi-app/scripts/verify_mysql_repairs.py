@@ -8,8 +8,8 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from tortoise import Tortoise, connections
-from models import User, Goods, Orders, Address, Cart, WalletTransaction, PurchaseRequest, Admin
+from tortoise import Tortoise
+from models import User, Goods, Orders, Address, Cart, WalletTransaction, Admin
 from settings import TORTOISE_ORM, DB_NAME
 from api.orders import add, OrdersCreatePydantic
 from api.cart import checkout, CartCheckoutPydantic

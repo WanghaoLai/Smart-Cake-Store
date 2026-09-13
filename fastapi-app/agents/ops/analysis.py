@@ -3,15 +3,13 @@
 与 insights.py 同一哲学：事实全部由 SQL + 确定性规则产出，LLM 只负责表述。
 情感与评分为规则判定（星级为主、词典辅助），可单测、可复现、无外部依赖。"""
 import asyncio
-import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from models import Goods, Orders, Review
 from common.time import STORE_TIMEZONE, format_store_time, utc_now
-from pypika_tortoise.functions import Date as SqlDate
-from tortoise.functions import Count, Function, Sum
+from tortoise.functions import Count, Sum
 
 from .insights import _count_keywords
 
@@ -28,12 +26,6 @@ _NEGATIVE_TERMS = (
 _NEGATION_PREFIX = ("不", "没", "别", "不太", "不是很")
 
 GOOD_STOCK_DAYS = (7, 30)  # 库存可售天数理想区间
-
-
-class DateOnly(Function):
-    """Portable DATE(column) expression supported by MySQL and SQLite."""
-
-    database_func = SqlDate
 
 
 def _hits(text: str, terms: tuple) -> int:

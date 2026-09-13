@@ -20,16 +20,3 @@ class LoginRequest(BaseModel):
 class PasswordUpdateRequest(BaseModel):
     password: str
     newPassword: str
-
-
-class UserInfo(BaseModel):
-    id: int
-    username: str
-    name: str | None = None
-    avatar: str | None = None
-    role: str | None = None
-
-
-class TokenResponse(BaseModel):
-    token: str
-    user: UserInfo
